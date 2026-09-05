@@ -9,7 +9,7 @@ import SimpleView from './components/SimpleView';
 import AboutView from './components/AboutView';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('about'); 
+  const [activeTab, setActiveTab] = useState('desktop'); 
   const [scanData, setScanData] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
@@ -66,27 +66,29 @@ export default function App() {
         <Header activeTab={activeTab} setActiveTab={setActiveTab} />
 
         <main className="flex-1 w-full max-w-7xl mx-auto p-6 flex flex-col">
-          {activeTab === 'about' && !scanData && !isScanning && (
-            <AboutView />
-          )}
+          <div key={activeTab} className="flex-1 flex flex-col animate-in fade-in duration-500">
+            {activeTab === 'about' && !scanData && !isScanning && (
+              <AboutView />
+            )}
 
-          {activeTab !== 'about' && !scanData && !isScanning && (
-            <UploadState activeTab={activeTab} onScan={handleScan} />
-          )}
+            {activeTab !== 'about' && !scanData && !isScanning && (
+              <UploadState activeTab={activeTab} onScan={handleScan} />
+            )}
 
-          {isScanning && (
-            <ScanningLoader />
-          )}
+            {isScanning && (
+              <ScanningLoader />
+            )}
 
-          {scanData && !isScanning && (
-            <div className="w-full h-full flex-1 mt-4 sm:mt-0">
-              {activeTab === 'desktop' ? (
-                <TechnicalView data={scanData} />
-              ) : (
-                <SimpleView data={scanData} />
-              )}
-            </div>
-          )}
+            {scanData && !isScanning && (
+              <div className="w-full h-full flex-1 mt-4 sm:mt-0">
+                {activeTab === 'desktop' ? (
+                  <TechnicalView data={scanData} />
+                ) : (
+                  <SimpleView data={scanData} />
+                )}
+              </div>
+            )}
+          </div>
         </main>
       </div>
     </div>

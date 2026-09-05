@@ -27,7 +27,7 @@ This prototype is engineered for maximum performance and visual fidelity without
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS (v4 Architecture)
 - **Icons**: Lucide-react
-- **Effects**: Custom Pure HTML5 `<canvas>` procedural animations (The Golden Vajra Effect) & heavy CSS Glassmorphism
+- **Effects**: Custom Pure HTML5 `<canvas>` procedural particle animations (Cyan/Purple theme) & heavy CSS Glassmorphism
 
 ## 🚀 Running the Prototype Locally
 
