@@ -3,7 +3,7 @@
 
 > **🚧 PROTOTYPE STATUS NOTICE**
 > 
-> This repository contains the **Frontend UI Prototype** developed for the Smart India Hackathon (SIH). It explicitly demonstrates the intended user flow, UI/UX architecture, routing, and forensic visualization components using a simulated data pipeline. The backend integration and live API are currently in active development.
+> This repository contains the **Prototype** developed for the Smart India Hackathon (SIH). It explicitly demonstrates the intended user flow, UI/UX architecture, routing, and forensic visualization components. The backend integration and live API are currently in active development.
 
 ---
 
@@ -51,6 +51,10 @@ To evaluate the UI flows, animations, and simulated forensic output on your loca
 
 4. **View the Application**
    Open your browser and navigate to the `localhost` URL provided in the terminal (typically `http://localhost:5173`).
+
+## ✍️ Author
+
+**Error404**
 
 ## 📄 License
 
