@@ -1,0 +1,16 @@
+Set-Content -Path .gitignore -Value @"
+myenv/
+.venv/
+venv/
+*.pyc
+__pycache__/
+.env
+*.db
+vajra.db
+data/*.mmdb
+.pytest_cache/
+"@
+Add-Content -Path .gitignore -Value @"
+*.eml
+*.msg
+"@

@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vajra-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vajra_user:vajra_pass@postgres:5432/vajra_db
+      - ENVIRONMENT=production
+      - SECRET_KEY=vajra_super_secret_cryptographic_jwt_key_2026_sih_hackathon_secure
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: vajra-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: vajra_user
+      POSTGRES_PASSWORD: vajra_pass
+      POSTGRES_DB: vajra_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - vajra_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vajra_user -d vajra_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  vajra_pgdata:
+    driver: local

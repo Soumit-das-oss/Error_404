@@ -1,0 +1,24 @@
+# Local environments & caches
+myenv/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# Secrets & Local State
+.git/
+.env
+vajra.db
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Large binary GeoIP files (downloaded in container or mounted)
+data/*.mmdb
+data/*.tmp

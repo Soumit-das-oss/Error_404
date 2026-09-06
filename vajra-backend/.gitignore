@@ -1,0 +1,37 @@
+# Environments
+myenv/
+.venv/
+env/
+venv/
+
+# Environment Variables & Secrets
+.env
+
+# Python Bytecode & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local Forensic Databases & Logs
+*.db
+vajra.db
+*.sqlite
+*.sqlite3
+*.log
+pgdata/
+vajra_pgdata/
+
+# Heavy Binary MaxMind GeoIP Databases (Use python scripts/download_geoip.py to fetch)
+data/*.mmdb
+data/*.tmp
+
+# OS & Editor Specific
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
