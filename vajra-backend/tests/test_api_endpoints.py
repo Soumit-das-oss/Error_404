@@ -284,3 +284,307 @@ async def test_openapi_dlp_masking_schema_is_required_enum(async_client):
         assert enum_schema["enum"] == ["true", "false"]
     else:
         assert dlp_param["schema"]["enum"] == ["true", "false"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_raw_with_mobile_attachments_image_qr(async_client):
+    import qrcode
+
+    # Generate in-memory synthetic QR code image pointing to a quishing URL
+    qr_img = qrcode.make("https://fake-login-update.com/login")
+    qr_buf = io.BytesIO()
+    qr_img.save(qr_buf, format="PNG")
+    qr_bytes = qr_buf.getvalue()
+
+    raw_email = (
+        "From: IT Support <support@company.com>\r\n"
+        "To: employee@company.com\r\n"
+        "Subject: Urgent: Multi-Factor Authentication QR Setup\r\n"
+        "Date: Mon, 15 Jan 2026 10:00:00 +0000\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "Please scan the attached QR code to re-authenticate your account."
+    )
+
+    data = {"raw_email": raw_email}
+    files = [
+        ("attachments", ("mfa_qr.png", io.BytesIO(qr_bytes), "image/png")),
+    ]
+
+    res = await async_client.post("/api/v1/raw", data=data, files=files)
+    assert res.status_code == 200
+    res_data = res.json()
+
+    # 1. Assert subject and sender are correctly extracted
+    assert res_data["subject"] == "Urgent: Multi-Factor Authentication QR Setup"
+    assert "support@company.com" in res_data["sender"]
+
+    # 2. Assert mobile attachment is recorded in metadata
+    assert len(res_data["attachments"]) == 1
+    assert res_data["attachments"][0]["filename"] == "mfa_qr.png"
+    assert "image/png" in res_data["attachments"][0]["content_type"]
+
+    # 3. Assert quishing heuristics evaluated
+    assert res_data["quishing_detected"] is True
+    assert "https://fake-login-update.com/login" in res_data["artifacts"]["qr_code_urls"]
+
+    # 4. Quishing QR Code (+40) penalty must be triggered and verdict cannot be SAFE
+    rules = [p["rule"] for p in res_data["risk"]["itemized_penalties"]]
+    assert any(r in ("Quishing QR Code", "QUISHING_QR_FOUND") for r in rules)
+    assert res_data["risk"]["score"] >= 40
+    assert res_data["verdict"] in ("SUSPICIOUS", "MALICIOUS")
+
+
+@pytest.mark.asyncio
+async def test_analyze_raw_pratiksha_dabhekar_gmail_bec_with_attachments(async_client):
+    import qrcode
+
+    # Generate synthetic QR code
+    qr_img = qrcode.make("https://malicious-gateway.com/verify-account")
+    qr_buf = io.BytesIO()
+    qr_img.save(qr_buf, format="PNG")
+    qr_bytes = qr_buf.getvalue()
+
+    raw_email = (
+        "From: Pratiksha Dabhekar <shraddhadabhekar21072011@gmail.com>\r\n"
+        "Subject: URGENT: Payment Account Verification Required\r\n"
+        "\r\n"
+        "Dear user, verify payment immediately."
+    )
+
+    data = {"raw_email": raw_email}
+    files = [
+        ("attachments", ("payment_qr.png", io.BytesIO(qr_bytes), "image/png")),
+    ]
+
+    res = await async_client.post("/api/v1/raw", data=data, files=files)
+    assert res.status_code == 200
+    res_data = res.json()
+
+    # 1. Assert non-null subject and sender extracted
+    assert res_data["subject"] == "URGENT: Payment Account Verification Required"
+    assert "shraddhadabhekar21072011@gmail.com" in res_data["sender"]
+    assert res_data["sender_domain"] == "gmail.com"
+
+    # 2. Assert attachments length >= 1
+    assert len(res_data["attachments"]) >= 1
+    assert res_data["attachments"][0]["filename"] == "payment_qr.png"
+
+    # 3. Assert quishing detected
+    assert res_data["quishing_detected"] is True
+    assert "https://malicious-gateway.com/verify-account" in res_data["artifacts"]["qr_code_urls"]
+
+    # 4. Assert risk score >= 55 (with quishing floor >= 60)
+    assert res_data["risk"]["score"] >= 55
+    assert res_data["verdict"] in ("SUSPICIOUS", "MALICIOUS")
+
+    # 5. Assert BEC and Quishing penalties triggered
+    rules = [p["rule"] for p in res_data["risk"]["itemized_penalties"]]
+    assert "FREE_WEBMAIL_FINANCIAL_LURE" in rules
+    assert "COERCIVE_URGENCY" in rules
+    assert any(r in ("QUISHING_QR_FOUND", "Quishing QR Code") for r in rules)
+
+
+@pytest.mark.asyncio
+async def test_benign_qr_code_evaluates_safe(async_client):
+    import qrcode
+
+    # Generate benign QR pointing to google.com
+    qr_img = qrcode.make("https://google.com")
+    qr_buf = io.BytesIO()
+    qr_img.save(qr_buf, format="PNG")
+    qr_bytes = qr_buf.getvalue()
+
+    raw_email = (
+        "From: Corporate Relations <relations@company.com>\r\n"
+        "To: employee@company.com\r\n"
+        "Subject: Connect with our Official Portal\r\n"
+        "Date: Mon, 15 Jan 2026 10:00:00 +0000\r\n"
+        "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "Scan the QR code to visit our official verified search and resource page."
+    )
+
+    data = {"raw_email": raw_email}
+    files = [
+        ("attachments", ("google_qr.png", io.BytesIO(qr_bytes), "image/png")),
+    ]
+
+    res = await async_client.post("/api/v1/raw", data=data, files=files)
+    assert res.status_code == 200
+    res_data = res.json()
+
+    # Assert quishing is NOT flagged on benign QR code
+    assert res_data["quishing_detected"] is False
+    assert res_data["risk"]["score"] < 20
+    assert res_data["verdict"] == "SAFE"
+
+    rules = [p["rule"] for p in res_data["risk"]["itemized_penalties"]]
+    assert "QUISHING_QR_FOUND" not in rules
+    assert "Quishing QR Code" not in rules
+    assert any(p["rule"] == "Benign QR Code Verified" for p in res_data["risk"]["itemized_penalties"])
+
+
+@pytest.mark.asyncio
+async def test_malicious_quishing_qr_triggers_penalty(async_client):
+    import qrcode
+
+    # Generate malicious QR pointing to unencrypted internal/direct IP login portal
+    qr_img = qrcode.make("http://192.168.1.50/login")
+    qr_buf = io.BytesIO()
+    qr_img.save(qr_buf, format="PNG")
+    qr_bytes = qr_buf.getvalue()
+
+    raw_email = (
+        "From: IT Admin <admin@secure-corp.com>\r\n"
+        "To: user@secure-corp.com\r\n"
+        "Subject: Security Re-Authentication Notice\r\n"
+        "Date: Mon, 15 Jan 2026 10:00:00 +0000\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "Please authenticate using the direct IP terminal QR code."
+    )
+
+    data = {"raw_email": raw_email}
+    files = [
+        ("attachments", ("terminal_qr.png", io.BytesIO(qr_bytes), "image/png")),
+    ]
+
+    res = await async_client.post("/api/v1/raw", data=data, files=files)
+    assert res.status_code == 200
+    res_data = res.json()
+
+    # Assert quishing IS flagged on direct IP / unencrypted login QR
+    assert res_data["quishing_detected"] is True
+    assert res_data["risk"]["score"] >= 60
+    assert res_data["verdict"] in ("SUSPICIOUS", "MALICIOUS")
+    rules = [p["rule"] for p in res_data["risk"]["itemized_penalties"]]
+    assert any(r in ("QUISHING_QR_FOUND", "Quishing QR Code") for r in rules)
+
+
+@pytest.mark.asyncio
+async def test_clean_pdf_attachment_evaluates_safe(async_client):
+    from reportlab.pdfgen import canvas
+
+    # Generate in-memory clean invoice PDF
+    pdf_buf = io.BytesIO()
+    c = canvas.Canvas(pdf_buf)
+    c.drawString(100, 750, "Standard Corporate Invoice #88412")
+    c.drawString(100, 730, "Amount: $500.00. Clean accounting telemetry.")
+    c.save()
+    pdf_bytes = pdf_buf.getvalue()
+
+    raw_email = (
+        "From: Accounts Payable <accounts@trusted-vendor.com>\r\n"
+        "To: client@company.com\r\n"
+        "Subject: Monthly Service Invoice\r\n"
+        "Date: Mon, 15 Jan 2026 10:00:00 +0000\r\n"
+        "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "Attached is your standard monthly service invoice for audit records."
+    )
+
+    data = {"raw_email": raw_email}
+    files = [
+        ("attachments", ("invoice.pdf", io.BytesIO(pdf_bytes), "application/pdf")),
+    ]
+
+    res = await async_client.post("/api/v1/raw", data=data, files=files)
+    assert res.status_code == 200
+    res_data = res.json()
+
+    # Assert clean PDF receives zero threat penalty and evaluates SAFE
+    assert res_data["risk"]["score"] < 20
+    assert res_data["verdict"] == "SAFE"
+
+    # Assert attachment metadata is cleanly recorded
+    assert len(res_data["attachments"]) == 1
+    assert res_data["attachments"][0]["filename"] == "invoice.pdf"
+    assert len(res_data["attachments"][0]["sha256"]) == 64
+
+    # Assert zero PDF threat rules triggered
+    rules = [p["rule"] for p in res_data["risk"]["itemized_penalties"]]
+    assert "PDF_EMBEDDED_JAVASCRIPT" not in rules
+    assert "PDF_MALICIOUS_LAUNCH_ACTION" not in rules
+    assert "PDF_DECEPTIVE_HYPERLINK" not in rules
+
+
+@pytest.mark.asyncio
+async def test_corrupted_truncated_mime_email_pratiksha_dabhekar(async_client):
+    raw_corrupted_mime = (
+        "From: Pratiksha Dabhekar <shraddhadabhekar21072011@gmail.com>\r\n"
+        "Subject: URGENT: Payment Account Verification Required\r\n"
+        "MIME-Version: 1.0\r\n"
+        'Content-Type: multipart/mixed; boundary="====CORRUPT_BOUNDARY===="\r\n'
+        "\r\n"
+        "--====CORRUPT_BOUNDARY====\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        "Dear user, verify payment immediately.\r\n"
+        "--====CORRUPT_BOUNDARY====\r\n"
+        'Content-Type: application/pdf; name="invoice.pdf"\r\n'
+        "Content-Transfer-Encoding: base64\r\n"
+        'Content-Disposition: attachment; filename="invoice.pdf"\r\n'
+        "\r\n"
+        "!!!INVALID_BASE64_CORRUPTED_BLOCK===\r\n"
+        "--====CORRUPT_BOUNDARY====\r\n"
+        'Content-Type: image/png; name="empty.png"\r\n'
+        "Content-Transfer-Encoding: base64\r\n"
+        'Content-Disposition: attachment; filename="empty.png"\r\n'
+        "\r\n"
+        "--====CORRUPT_BOUNDARY====--\r\n"
+    )
+
+    res = await async_client.post("/api/v1/raw", json={"raw_email": raw_corrupted_mime})
+    assert res.status_code == 200
+    res_data = res.json()
+
+    # Assert subject and sender domain extracted without parser crash
+    assert res_data["subject"] == "URGENT: Payment Account Verification Required"
+    assert res_data["sender_domain"] == "gmail.com"
+    assert "shraddhadabhekar21072011@gmail.com" in res_data["sender"]
+
+    # Assert BEC financial lure penalty applied and score floor >= 55
+    assert res_data["risk"]["score"] >= 55
+    assert res_data["verdict"] in ("SUSPICIOUS", "MALICIOUS")
+    rules = [p["rule"] for p in res_data["risk"]["itemized_penalties"]]
+    assert "FREE_WEBMAIL_FINANCIAL_LURE" in rules
+    assert "COERCIVE_URGENCY" in rules
+
+
+@pytest.mark.asyncio
+async def test_collapsed_single_line_headers_extraction(async_client):
+    # Construct an email and collapse all newlines into spaces (browser form-data simulation)
+    multiline_email = (
+        "Delivered-To: victim@example.com\n"
+        "Received: by mail-ej1-f49.google.com with SMTP id e9-20020a170906328900b00a0c4f3d1234\n"
+        "From: Pratiksha Dabhekar <pratikshadabhekar44@gmail.com>\n"
+        "Date: Mon, 7 Sep 2026 10:00:00 +0000\n"
+        "Subject: Urgent: Verify Corporate Billing Account\n"
+        "To: victim@example.com\n"
+        "Content-Type: text/plain\n"
+        "\n"
+        "Dear employee, please verify your corporate billing account credentials immediately."
+    )
+    collapsed_email = multiline_email.replace("\r", "").replace("\n", " ")
+
+    # Verify via JSON payload
+    res = await async_client.post("/api/v1/raw", json={"raw_email": collapsed_email})
+    assert res.status_code == 200
+    res_data = res.json()
+
+    assert res_data["subject"] == "Urgent: Verify Corporate Billing Account"
+    assert "pratikshadabhekar44@gmail.com" in res_data["sender"]
+    assert res_data["sender_domain"] == "gmail.com"
+
+    # Verify via Form-Data payload (simulating Swagger UI browser form post)
+    res_form = await async_client.post("/api/v1/raw", data={"raw_email": collapsed_email})
+    assert res_form.status_code == 200
+    res_form_data = res_form.json()
+
+    assert res_form_data["subject"] == "Urgent: Verify Corporate Billing Account"
+    assert "pratikshadabhekar44@gmail.com" in res_form_data["sender"]
+    assert res_form_data["sender_domain"] == "gmail.com"
+

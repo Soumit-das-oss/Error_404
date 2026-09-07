@@ -498,7 +498,45 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
     deduction_table.setStyle(TableStyle(ded_style))
     story.append(deduction_table)
 
-    # 7. Running Footer Callback
+    # 7. In-Memory Attachments Forensic Metadata Audit
+    attachments = case_intel.get("attachments", [])
+    if attachments:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("ATTACHMENT FORENSIC HASH &amp; METADATA AUDIT", section_heading_style))
+        att_col_widths = [1.8 * inch, 1.2 * inch, 0.8 * inch, 3.2 * inch]
+        att_headers = [
+            Paragraph("Filename", th_style),
+            Paragraph("Content-Type", th_style),
+            Paragraph("Size", th_style),
+            Paragraph("Cryptographic Hash (SHA-256)", th_style),
+        ]
+        att_table_data = [att_headers]
+        for a in attachments:
+            fname = Paragraph(_pdf_sanitize(a.get("filename", "unnamed")), td_left_style)
+            ctype = Paragraph(_pdf_sanitize(a.get("content_type", "application/octet-stream")), td_left_style)
+            size_b = a.get("size_bytes", 0)
+            size_str = f"{size_b / 1024:.1f} KB" if size_b >= 1024 else f"{size_b} B"
+            sz = Paragraph(size_str, td_center_style)
+            sha = Paragraph(_pdf_sanitize(a.get("sha256", "-")), td_mono_style)
+            att_table_data.append([fname, ctype, sz, sha])
+
+        att_table = Table(att_table_data, colWidths=att_col_widths)
+        att_style = [
+            ("BACKGROUND", (0, 0), (-1, 0), SLATE_HEADER),
+            ("GRID", (0, 0), (-1, -1), 0.5, SLATE_BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]
+        for r in range(1, len(att_table_data)):
+            bg = ROW_ALT if r % 2 == 1 else WHITE
+            att_style.append(("BACKGROUND", (0, r), (-1, r), bg))
+        att_table.setStyle(TableStyle(att_style))
+        story.append(att_table)
+
+    # 8. Running Footer Callback
     def _add_running_footer(canvas, doc_obj):
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)

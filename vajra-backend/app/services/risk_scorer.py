@@ -12,6 +12,8 @@ from app.core.constants import (
     PENALTY_QUISHING_QR,
     PENALTY_URGENCY_INDICATORS,
     PENALTY_FREE_WEBMAIL_LURE,
+    PENALTY_PDF_JAVASCRIPT,
+    PENALTY_PDF_LAUNCH,
     VERDICT_SAFE,
     VERDICT_SUSPICIOUS,
     VERDICT_MALICIOUS,
@@ -32,6 +34,13 @@ def calculate_risk_score(
     sender_domain: Optional[str] = None,
     has_financial_lure: bool = False,
     financial_lure_matches: Optional[List[str]] = None,
+    quishing_detected: bool = False,
+    is_suspicious_qr: bool = True,
+    benign_qr_urls: Optional[List[str]] = None,
+    has_pdf_javascript: bool = False,
+    has_pdf_launch: bool = False,
+    pdf_deceptive_links: Optional[List[Dict[str, Any]]] = None,
+    is_authentic_pdf: bool = False,
 ) -> Dict[str, Any]:
     """Calculate deterministic 0-100 threat score based on forensic evidence.
 
@@ -110,15 +119,42 @@ def calculate_risk_score(
             ),
         })
 
-    # 5. Quishing QR (+40)
-    if qr_urls:
-        penalty = PENALTY_QUISHING_QR
-        total_score += penalty
-        penalties.append({
-            "rule": "Quishing QR Code",
-            "penalty": penalty,
-            "reason": f"Decoded {len(qr_urls)} embedded visual QR code link(s) in visual attachments.",
-        })
+    # 5. Quishing QR (+40) Evaluation
+    # Only penalize when QR is actively suspicious (e.g. direct IP, shortener, phishing endpoint).
+    # Benign QR codes receive 0 penalty and allow clean SAFE evaluation.
+    if quishing_detected:
+        if is_suspicious_qr:
+            penalty = PENALTY_QUISHING_QR
+            total_score += penalty
+            penalties.append({
+                "rule": "QUISHING_QR_FOUND",
+                "penalty": penalty,
+                "reason": f"Decoded {len(qr_urls or [1])} malicious embedded visual QR code link(s) leading to deceptive/phishing endpoints.",
+            })
+            total_score = max(total_score, 60)
+        else:
+            url_disp = benign_qr_urls[0] if benign_qr_urls else (qr_urls[0] if qr_urls else "Clean QR payload")
+            penalties.append({
+                "rule": "Benign QR Code Verified",
+                "penalty": 0,
+                "reason": f"Benign QR Code Verified: {url_disp}",
+            })
+    elif qr_urls:
+        if is_suspicious_qr:
+            penalty = PENALTY_QUISHING_QR
+            total_score += penalty
+            penalties.append({
+                "rule": "Quishing QR Code",
+                "penalty": penalty,
+                "reason": f"Decoded {len(qr_urls)} embedded visual QR code link(s) in visual attachments.",
+            })
+        else:
+            url_disp = qr_urls[0] if qr_urls else "Clean QR payload"
+            penalties.append({
+                "rule": "Benign QR Code Verified",
+                "penalty": 0,
+                "reason": f"Benign QR Code Verified: {url_disp}",
+            })
 
     # 6 & 7: Urgency, Free Webmail BEC, & Financial Lure Evaluation
     sender_dom = (sender_domain or "").lower().strip()
@@ -179,6 +215,39 @@ def calculate_risk_score(
                 "reason": lure_reason or "Executive or institutional authority claimed from free public webmail account.",
             })
 
+    # 8. Deep PDF Telemetry Analysis
+    if has_pdf_launch:
+        penalty = PENALTY_PDF_LAUNCH
+        total_score += penalty
+        penalties.append({
+            "rule": "PDF_MALICIOUS_LAUNCH_ACTION",
+            "penalty": penalty,
+            "reason": "PDF attachment contains dangerous /Launch or /EmbeddedFiles action targeting binary execution.",
+        })
+    elif has_pdf_javascript:
+        penalty = PENALTY_PDF_JAVASCRIPT
+        total_score += penalty
+        penalties.append({
+            "rule": "PDF_EMBEDDED_JAVASCRIPT",
+            "penalty": penalty,
+            "reason": "PDF attachment contains embedded active /JavaScript or /JS execution stream.",
+        })
+
+    if pdf_deceptive_links:
+        penalty = PENALTY_DECEPTIVE_LINK
+        total_score += penalty
+        penalties.append({
+            "rule": "PDF_DECEPTIVE_HYPERLINK",
+            "penalty": penalty,
+            "reason": f"PDF document embeds {len(pdf_deceptive_links)} deceptive hyperlink(s) misrepresenting destination domain.",
+        })
+
+    if is_authentic_pdf and not has_pdf_javascript and not has_pdf_launch and not pdf_deceptive_links:
+        penalties.append({
+            "rule": "Authentic PDF Document Inspected",
+            "penalty": 0,
+            "reason": "Authentic PDF Document Inspected: standard text and clean links; zero malicious exploitation tags detected.",
+        })
 
     # Bound score strictly to [0, 100]
     bounded_score = min(100, max(0, total_score))
@@ -192,8 +261,10 @@ def calculate_risk_score(
         verdict = VERDICT_MALICIOUS
 
     # Hard Forensic Override:
-    # Quishing QR or deceptive links must never receive a SAFE verdict
-    if (qr_urls or deceptive_links) and verdict == VERDICT_SAFE:
+    # Active malicious QR or deceptive links must never receive a SAFE verdict
+    has_active_malicious_qr = (quishing_detected or bool(qr_urls)) and is_suspicious_qr
+    has_active_pdf_threat = has_pdf_javascript or has_pdf_launch or bool(pdf_deceptive_links)
+    if (has_active_malicious_qr or deceptive_links or has_active_pdf_threat) and verdict == VERDICT_SAFE:
         verdict = VERDICT_SUSPICIOUS
 
     return {

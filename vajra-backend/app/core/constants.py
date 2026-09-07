@@ -15,6 +15,8 @@ PENALTY_DECEPTIVE_LINK: int = 25
 PENALTY_QUISHING_QR: int = 40
 PENALTY_URGENCY_INDICATORS: int = 20
 PENALTY_FREE_WEBMAIL_LURE: int = 35
+PENALTY_PDF_JAVASCRIPT: int = 35
+PENALTY_PDF_LAUNCH: int = 45
 
 # Verdict Thresholds
 VERDICT_SAFE: str = "SAFE"
@@ -106,6 +108,10 @@ URGENCY_PATTERNS: List[str] = [
     "account will be closed",
     "immediate response needed",
     "quishing",
+    "verify payment",
+    "verify payment immediately",
+    "payment verification",
+    "account verification",
 ]
 
 FINANCIAL_ACCOUNT_LURES: List[str] = [
@@ -126,6 +132,10 @@ FINANCIAL_ACCOUNT_LURES: List[str] = [
     "reset password",
     "critical patch",
     "critical alert",
+    "verify payment",
+    "payment verification",
+    "account verification",
+    "payment account verification",
 ]
 
 DANGEROUS_PAYLOAD_EXTENSIONS: List[str] = [

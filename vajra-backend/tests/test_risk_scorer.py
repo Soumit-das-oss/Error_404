@@ -149,3 +149,46 @@ def test_corporate_newsletter_receives_discount():
     assert result["verdict"] == "SAFE"
     rules = [p["rule"] for p in result["penalties"]]
     assert "Marketing / Newsletter Time-Sensitive Notice" in rules
+
+
+def test_benign_qr_code_scores_zero():
+    auth = {"spf": {"status": "PASS"}, "dkim": {"status": "PASS"}, "dmarc": {"status": "PASS"}}
+    result = calculate_risk_score(
+        auth_matrix=auth,
+        qr_urls=["https://google.com"],
+        quishing_detected=True,
+        is_suspicious_qr=False,
+    )
+    assert result["score"] == 0
+    assert result["verdict"] == "SAFE"
+    assert any(p["rule"] == "Benign QR Code Verified" for p in result["penalties"])
+
+
+def test_pdf_threat_penalties_javascript_and_launch():
+    auth = {"spf": {"status": "PASS"}, "dkim": {"status": "PASS"}, "dmarc": {"status": "PASS"}}
+    result_js = calculate_risk_score(
+        auth_matrix=auth,
+        has_pdf_javascript=True,
+    )
+    assert result_js["score"] == 35
+    assert result_js["verdict"] == "SUSPICIOUS"
+    assert any(p["rule"] == "PDF_EMBEDDED_JAVASCRIPT" for p in result_js["penalties"])
+
+    result_launch = calculate_risk_score(
+        auth_matrix=auth,
+        has_pdf_launch=True,
+    )
+    assert result_launch["score"] == 45
+    assert result_launch["verdict"] == "SUSPICIOUS"
+    assert any(p["rule"] == "PDF_MALICIOUS_LAUNCH_ACTION" for p in result_launch["penalties"])
+
+
+def test_clean_pdf_scores_zero():
+    auth = {"spf": {"status": "PASS"}, "dkim": {"status": "PASS"}, "dmarc": {"status": "PASS"}}
+    result = calculate_risk_score(
+        auth_matrix=auth,
+        is_authentic_pdf=True,
+    )
+    assert result["score"] == 0
+    assert result["verdict"] == "SAFE"
+    assert any(p["rule"] == "Authentic PDF Document Inspected" for p in result["penalties"])

@@ -99,6 +99,7 @@ class ArtifactContentDTO(BaseModel):
         default_factory=list,
         description="Decoded URLs from embedded QR codes (Quishing threat vectors)"
     )
+    quishing_detected: bool = Field(False, description="True if a QR code quishing vector was identified")
     ocr_extracted_text: List[str] = Field(
         default_factory=list,
         description="Text recognized from image attachments or PDF images via local OCR"
@@ -179,6 +180,8 @@ class CaseResponseDTO(BaseModel):
     subject: Optional[str] = Field(None, description="Extracted email subject line")
     sender: Optional[str] = Field(None, description="Sender email address / envelope from")
     sender_display_name: Optional[str] = Field(None, description="Sender display name")
+    sender_address: Optional[str] = Field(None, description="Normalized sender email address")
+    sender_domain: Optional[str] = Field(None, description="Extracted sender domain")
     recipient: Optional[str] = Field(None, description="Recipient email address")
     date: Optional[str] = Field(None, description="Origination timestamp from email header")
     message_id: Optional[str] = Field(None, description="RFC 5322 Message-ID header")
@@ -205,6 +208,7 @@ class CaseResponseDTO(BaseModel):
     attachments: List[AttachmentMetaDTO] = Field(default_factory=list, description="Attachment metadata")
     risk: RiskBreakdownDTO = Field(..., description="Deterministic scoring matrix and verdict")
     verdict: Optional[str] = Field(None, description="Overall forensic verdict reflecting overrides (SAFE, SUSPICIOUS, MALICIOUS, INCOMPLETE_ANALYSIS)")
+    quishing_detected: Optional[bool] = Field(False, description="True if a QR code quishing vector was identified")
     llm_summary: str = Field(..., description="2-3 sentence cyber threat analyst executive brief")
     dlp_security: DlpSecurityDTO = Field(
         default_factory=lambda: DlpSecurityDTO(

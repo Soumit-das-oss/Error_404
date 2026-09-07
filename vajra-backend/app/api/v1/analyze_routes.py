@@ -3,6 +3,7 @@ VAJRA Forensic Platform - Email Ingestion & Analysis Routes
 Handles multipart file uploads (.eml / .msg) and raw RFC 5322 MIME text/json streams.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -17,7 +18,7 @@ from app.parsers.msg_parser import parse_msg_bytes
 from app.parsers.header_engine import parse_hops_and_origin, audit_authentication_headers
 from app.analyzers.text_analyzer import analyze_text_patterns
 from app.analyzers.url_analyzer import analyze_urls
-from app.analyzers.qr_engine import extract_qr_codes
+from app.analyzers.qr_engine import extract_qr_codes, scan_qr_bytes, extract_qr_telemetry
 from app.analyzers.pdf_engine import extract_pdf_telemetry
 from app.services.risk_scorer import calculate_risk_score
 from app.services.ai.explainer_orchestrator import generate_threat_explanation
@@ -42,13 +43,16 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         raw_bytes=parsed.get("raw_bytes"),
     )
 
-    # 3. Attachment inspection & vision/PDF telemetry
+    # 3. Process attachments in-memory
     attachments = parsed.get("attachments", [])
     images_for_qr: List[bytes] = []
     pdf_links: List[str] = []
     pdf_deceptive_links: List[Dict[str, str]] = []
     pdf_text_snippets: List[str] = []
     attachment_meta: List[Dict[str, Any]] = []
+    has_pdf_javascript = False
+    has_pdf_launch = False
+    has_pdf_attachment = False
 
     for att in attachments:
         fname = att.get("filename", "")
@@ -69,6 +73,7 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
 
         # In-memory PDF telemetry
         if ctype == "application/pdf" or fname.lower().endswith(".pdf"):
+            has_pdf_attachment = True
             pdf_telem = extract_pdf_telemetry(pbytes)
             if pdf_telem.get("links"):
                 pdf_links.extend(pdf_telem["links"])
@@ -78,13 +83,21 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
                 images_for_qr.extend(pdf_telem["images"])
             if pdf_telem.get("text"):
                 pdf_text_snippets.append(pdf_telem["text"][:300])
+            if pdf_telem.get("has_javascript"):
+                has_pdf_javascript = True
+            if pdf_telem.get("has_launch_action"):
+                has_pdf_launch = True
 
         # Image telemetry
         elif ctype.startswith("image/") or any(fname.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".bmp", ".webp"]):
             images_for_qr.append(pbytes)
 
-    # 4. QR Engine Quishing detection
-    qr_urls = extract_qr_codes(images_for_qr)
+    # 4. QR Engine Quishing detection & evidence-based threat triage
+    qr_telem = extract_qr_telemetry(images_for_qr)
+    qr_urls = qr_telem["qr_urls"]
+    is_suspicious_qr = qr_telem["is_suspicious_qr"]
+    benign_qr_urls = qr_telem["benign_qr_urls"]
+    quishing_detected = (len(qr_urls) > 0 and is_suspicious_qr)
 
     # 5. URL and deceptive hyperlink analysis
     all_aux_urls = list(set(pdf_links + qr_urls))
@@ -120,6 +133,13 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         sender_domain=parsed.get("sender_domain"),
         has_financial_lure=text_result.get("has_financial_lure", False),
         financial_lure_matches=text_result.get("financial_lure_matches", []),
+        quishing_detected=quishing_detected,
+        is_suspicious_qr=is_suspicious_qr,
+        benign_qr_urls=benign_qr_urls,
+        has_pdf_javascript=has_pdf_javascript,
+        has_pdf_launch=has_pdf_launch,
+        pdf_deceptive_links=pdf_deceptive_links,
+        is_authentic_pdf=has_pdf_attachment and not has_pdf_javascript and not has_pdf_launch and not pdf_deceptive_links,
     )
 
     # 8. AI Explainer with DLP and automatic 2-tier failover
@@ -151,6 +171,8 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         "subject": parsed.get("subject"),
         "sender": parsed.get("sender"),
         "sender_display_name": parsed.get("sender_display_name"),
+        "sender_address": parsed.get("sender_address"),
+        "sender_domain": parsed.get("sender_domain"),
         "recipient": parsed.get("recipient"),
         "date": parsed.get("date"),
         "message_id": parsed.get("message_id"),
@@ -171,6 +193,7 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
             "pdf_extracted_links": pdf_links,
             "pdf_extracted_text_snippets": pdf_text_snippets,
             "qr_code_urls": qr_urls,
+            "quishing_detected": quishing_detected,
             "ocr_extracted_text": [],
         },
         "engine_warnings": [],
@@ -183,6 +206,7 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
             "engine_warnings": [],
         },
         "verdict": risk_result["verdict"],
+        "quishing_detected": quishing_detected,
         "llm_summary": ai_result["summary"],
         "dlp_security": ai_result.get("dlp_security", {
             "status": "ACTIVE" if dlp_masking else "BYPASSED",
@@ -265,13 +289,34 @@ async def analyze_email_upload(
 @router.post(
     "/raw",
     response_model=CaseResponseDTO,
-    summary="Analyze raw RFC 5322 email string or text stream",
-    description="Analyze raw RFC 5322 email text submitted via JSON payload or direct plain text stream.",
+    summary="Analyze raw RFC 5322 email string, multipart form with attachments, or text stream",
+    description="Analyze raw RFC 5322 email text submitted via JSON payload, multipart form with file attachments, or direct plain text stream.",
     openapi_extra={
         "requestBody": {
             "content": {
                 "application/json": {
                     "schema": RawEmailRequest.model_json_schema()
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "raw_email": {
+                                "type": "string",
+                                "description": "Full RFC 5322 email text (headers + body)",
+                                "example": "From: security@paypal-alerts.com\nTo: victim@example.com\nSubject: Account Suspended\n\nDear user, verify your account within 24 hours."
+                            },
+                            "attachments": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary"
+                                },
+                                "description": "Mobile file attachments (PDF documents or QR code images)"
+                            }
+                        },
+                        "required": ["raw_email"]
+                    }
                 },
                 "text/plain": {
                     "schema": {
@@ -281,7 +326,7 @@ async def analyze_email_upload(
                 }
             },
             "required": True,
-            "description": "Full RFC 5322 email text submitted as JSON or raw plain text stream."
+            "description": "Full RFC 5322 email text submitted as JSON, multipart form with attachments, or raw plain text stream."
         }
     }
 )
@@ -294,51 +339,89 @@ async def analyze_raw_email(
     request: Request,
     dlp_masking: DlpOption = Query(..., description="Enable local in-memory PII masking"),
 ) -> CaseResponseDTO:
-    body_bytes = await request.body()
-    if len(body_bytes) > settings.MAX_PAYLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Payload exceeds maximum allowed size of {settings.MAX_PAYLOAD_BYTES // (1024 * 1024)} MB.",
-        )
+    content_type = request.headers.get("content-type", "").lower()
 
     is_dlp_active = (dlp_masking == DlpOption.TRUE or str(dlp_masking).lower() == "true")
     query_dlp = request.query_params.get("dlp_masking")
     if query_dlp is not None:
         is_dlp_active = query_dlp.lower() not in ("false", "0", "no")
 
-    content_type = request.headers.get("content-type", "").lower()
     raw_bytes: bytes = b""
+    extra_attachments: List[Dict[str, Any]] = []
 
-    # When request is JSON (e.g. {"raw_email": "..."}):
-    # Extract email string from payload.raw_email and convert to bytes
-    is_json = "application/json" in content_type or body_bytes.strip().startswith(b"{")
-    if is_json:
-        try:
-            body_json = json.loads(body_bytes.decode("utf-8", errors="ignore"))
-            if isinstance(body_json, dict):
-                if "raw_email" in body_json:
-                    email_str = str(body_json["raw_email"] or "")
-                    raw_bytes = email_str.encode("utf-8", errors="ignore")
-                elif "headers" in body_json:
-                    headers = str(body_json.get("headers") or "").strip()
-                    body = str(body_json.get("body") or "").strip()
-                    raw_bytes = f"{headers}\n\n{body}".strip().encode("utf-8", errors="ignore")
+    # 1. Handle Form Data (Multipart Mobile Flow or urlencoded browser form)
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        form = await request.form()
+        raw_email_val = form.get("raw_email") or form.get("email") or ""
+        if hasattr(raw_email_val, "read"):
+            raw_bytes = await raw_email_val.read()
+        else:
+            raw_email_str = str(raw_email_val).strip()
+            raw_bytes = raw_email_str.encode("utf-8", errors="ignore")
+
+        if query_dlp is None and "dlp_masking" in form:
+            is_dlp_active = str(form["dlp_masking"]).lower() not in ("false", "0", "no")
+
+        # Ingest mobile attachments in-memory dynamically (zero disk writes)
+        form_entries = form.multi_items() if hasattr(form, "multi_items") else form.items()
+        for key, item in form_entries:
+            if key in ("raw_email", "email", "dlp_masking"):
+                continue
+            if hasattr(item, "read") and hasattr(item, "filename"):
+                f_bytes = await item.read()
+                if not f_bytes:
+                    continue
+                if len(f_bytes) > settings.MAX_PAYLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Attachment exceeds maximum allowed size of {settings.MAX_PAYLOAD_BYTES // (1024 * 1024)} MB.",
+                    )
+                fname = getattr(item, "filename", "") or "mobile_attachment"
+                f_ctype = (getattr(item, "content_type", "") or "application/octet-stream").lower()
+                extra_attachments.append({
+                    "filename": fname,
+                    "content_type": f_ctype,
+                    "size_bytes": len(f_bytes),
+                    "payload_bytes": f_bytes,
+                    "sha256": hashlib.sha256(f_bytes).hexdigest(),
+                })
+    else:
+        # 2. Handle JSON and Plain Text streams
+        body_bytes = await request.body()
+        if len(body_bytes) > settings.MAX_PAYLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Payload exceeds maximum allowed size of {settings.MAX_PAYLOAD_BYTES // (1024 * 1024)} MB.",
+            )
+
+        is_json = "application/json" in content_type or body_bytes.strip().startswith(b"{")
+        if is_json:
+            try:
+                body_json = json.loads(body_bytes.decode("utf-8", errors="ignore"))
+                if isinstance(body_json, dict):
+                    if "raw_email" in body_json:
+                        email_str = str(body_json["raw_email"] or "")
+                        raw_bytes = email_str.encode("utf-8", errors="ignore")
+                    elif "headers" in body_json:
+                        headers = str(body_json.get("headers") or "").strip()
+                        body = str(body_json.get("body") or "").strip()
+                        raw_bytes = f"{headers}\n\n{body}".strip().encode("utf-8", errors="ignore")
+                    else:
+                        raw_bytes = body_bytes
+                elif isinstance(body_json, str):
+                    raw_bytes = body_json.encode("utf-8", errors="ignore")
                 else:
                     raw_bytes = body_bytes
-            elif isinstance(body_json, str):
-                raw_bytes = body_json.encode("utf-8", errors="ignore")
-            else:
-                raw_bytes = body_bytes
-        except Exception:
-            text_decoded = body_bytes.decode("utf-8", errors="ignore").strip()
-            match = re.search(r'"raw_email"\s*:\s*"(.*)"\s*\}?$', text_decoded, re.DOTALL)
-            if match:
-                raw_bytes = match.group(1).encode("utf-8", errors="ignore")
-            else:
-                raw_bytes = body_bytes
-    else:
-        # text/plain or raw data stream: read raw body bytes directly
-        raw_bytes = body_bytes
+            except Exception:
+                text_decoded = body_bytes.decode("utf-8", errors="ignore").strip()
+                match = re.search(r'"raw_email"\s*:\s*"(.*)"\s*\}?$', text_decoded, re.DOTALL)
+                if match:
+                    raw_bytes = match.group(1).encode("utf-8", errors="ignore")
+                else:
+                    raw_bytes = body_bytes
+        else:
+            # text/plain or raw data stream: read raw body bytes directly
+            raw_bytes = body_bytes
 
     if len(raw_bytes.strip()) < 10:
         raise HTTPException(
@@ -347,6 +430,9 @@ async def analyze_raw_email(
         )
 
     parsed = parse_eml_bytes(raw_bytes)
+    if extra_attachments:
+        parsed.setdefault("attachments", []).extend(extra_attachments)
+
     case_data = await execute_forensic_pipeline(parsed, dlp_masking=is_dlp_active)
     saved = save_case(case_data)
     return CaseResponseDTO.model_validate(saved)
