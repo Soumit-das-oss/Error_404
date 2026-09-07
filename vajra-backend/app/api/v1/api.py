@@ -1,16 +1,4 @@
-from fastapi import APIRouter
-from app.api.v1.endpoints import auth, analyze
+"""API v1 master router re-export."""
+from app.api.v1.router import router as api_router, router
 
-api_router = APIRouter()
-
-api_router.include_router(
-    auth.router,
-    prefix="/auth",
-    tags=["Authentication & Identity"]
-)
-
-api_router.include_router(
-    analyze.router,
-    prefix="/analyze",
-    tags=["Forensic Threat Intelligence & Analysis"]
-)
+__all__ = ["api_router", "router"]

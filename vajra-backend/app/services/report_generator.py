@@ -1,25 +1,90 @@
-import html
+"""
+VAJRA Forensic Platform - Certified PDF Report Generator (ReportLab Platypus)
+Produces an executive-grade digital forensic dossier with cryptographic integrity proof.
+Zero disk writes (100% in-memory buffer).
+"""
+
+import io
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Table,
+    TableStyle,
+    Spacer,
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.lib.pagesizes import A4
 
-def generate_html_report(case_intel: Dict[str, Any]) -> str:
-    """Generate a high-resolution, printable forensic dossier HTML report for an email case."""
-    case_id = html.escape(str(case_intel.get("case_id", "N/A")))
-    sha256 = html.escape(str(case_intel.get("sha256", "N/A")))
-    subject = html.escape(str(case_intel.get("subject") or "No Subject Line"))
-    sender = html.escape(str(case_intel.get("sender") or "Unknown"))
-    sender_display_name = html.escape(str(case_intel.get("sender_display_name") or "None"))
-    recipient = html.escape(str(case_intel.get("recipient") or "Unknown"))
-    date_hdr = html.escape(str(case_intel.get("date") or "N/A"))
-    message_id = html.escape(str(case_intel.get("message_id") or "N/A"))
-    created_at = html.escape(str(case_intel.get("created_at") or "N/A"))
-    earliest_public_ip = html.escape(str(case_intel.get("earliest_public_ip") or "None detected"))
-    llm_summary = html.escape(str(case_intel.get("llm_summary") or ""))
+
+def _pdf_sanitize(val: Any) -> str:
+    """Safely escape literal &, <, > characters for ReportLab Paragraph rendering."""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
+    """Generate a structured, executive-grade forensic PDF dossier using ReportLab Platypus.
+
+    Complies with:
+      - Standard A4 geometry with 0.5-inch margins (36pt)
+      - Zero disk writes (pure in-memory BytesIO buffer)
+      - Navy (#0F172A), Charcoal (#1E293B), and threat tier color palette
+      - Auto-wrapping Paragraph cells in tables for SHA-256 and long headers
+      - Multi-column MTA hop and deduction tables
+      - Running footer: 'Certified Digital Forensic Dossier | VAJRA Forensic Platform (Air-Gapped Ingestion)'
+    """
+    if hasattr(case_data, "model_dump"):
+        case_intel = case_data.model_dump(mode="json")
+    else:
+        case_intel = dict(case_data or {})
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=36,
+        rightMargin=36,
+        topMargin=36,
+        bottomMargin=36,
+    )
+
+    # Design System & Palette
+    NAVY = colors.HexColor("#0F172A")
+    CHARCOAL = colors.HexColor("#1E293B")
+    SLATE_BORDER = colors.HexColor("#CBD5E1")
+    SLATE_HEADER = colors.HexColor("#E2E8F0")
+    ROW_ALT = colors.HexColor("#F8FAFC")
+    WHITE = colors.HexColor("#FFFFFF")
+
+    CRIMSON = colors.HexColor("#DC2626")
+    AMBER = colors.HexColor("#D97706")
+    EMERALD = colors.HexColor("#16A34A")
+
+    CRIMSON_BG = colors.HexColor("#FEF2F2")
+    AMBER_BG = colors.HexColor("#FFFBEB")
+    EMERALD_BG = colors.HexColor("#F0FDF4")
+
+    # Extract forensic fields
+    case_id = str(case_intel.get("case_id", "N/A"))
+    sha256 = str(case_intel.get("sha256", "N/A"))
+    subject = str(case_intel.get("subject") or "No Subject Line")
+    sender = str(case_intel.get("sender") or "Unknown")
+    sender_display_name = str(case_intel.get("sender_display_name") or "None")
+    message_id = str(case_intel.get("message_id") or "N/A")
+    earliest_public_ip = str(case_intel.get("earliest_public_ip") or "None detected")
+    llm_summary = str(case_intel.get("llm_summary") or case_intel.get("ai_summary") or "Forensic examination completed.")
 
     risk = case_intel.get("risk", {})
-    score = int(risk.get("score", 0))
-    verdict = str(risk.get("verdict", "SAFE")).upper()
-    penalties = risk.get("itemized_penalties", [])
+    score = int(risk.get("score", case_intel.get("score", 0)))
+    verdict = str(risk.get("verdict", case_intel.get("verdict", "SAFE"))).upper()
+    penalties = risk.get("penalties", case_intel.get("penalties", []))
 
     auth = case_intel.get("auth", {})
     spf = auth.get("spf", {})
@@ -28,724 +93,427 @@ def generate_html_report(case_intel: Dict[str, Any]) -> str:
 
     hops: List[Dict[str, Any]] = case_intel.get("hops", [])
 
-    # Theme colors based on verdict
-    if verdict == "CRITICAL":
-        badge_bg = "#ef4444"
-        badge_border = "#dc2626"
-        verdict_color = "#f87171"
-    elif verdict == "SUSPICIOUS":
-        badge_bg = "#f59e0b"
-        badge_border = "#d97706"
-        verdict_color = "#fbbf24"
+    # Determine threat theme
+    if verdict in ("MALICIOUS", "CRITICAL") or score >= 60:
+        threat_color = CRIMSON
+        threat_bg = CRIMSON_BG
+        verdict_label = "MALICIOUS THREAT"
+    elif verdict == "SUSPICIOUS" or (20 <= score <= 59):
+        threat_color = AMBER
+        threat_bg = AMBER_BG
+        verdict_label = "SUSPICIOUS ANOMALY"
     else:
-        badge_bg = "#10b981"
-        badge_border = "#059669"
-        verdict_color = "#34d399"
+        threat_color = EMERALD
+        threat_bg = EMERALD_BG
+        verdict_label = "SAFE / AUTHENTIC"
 
-    # Build auth status badges
-    def auth_badge(status_str: str) -> str:
-        s = status_str.upper()
-        if s == "PASS":
-            return '<span class="status-pill status-pass">PASS</span>'
-        elif s in ("FAIL", "SOFTFAIL"):
-            return f'<span class="status-pill status-fail">{html.escape(s)}</span>'
-        elif s in ("NONE", "MISSING"):
-            return f'<span class="status-pill status-warn">{html.escape(s)}</span>'
+    # Styles
+    styles = getSampleStyleSheet()
+
+    doc_title_style = ParagraphStyle(
+        "VajraDocTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=15,
+        textColor=NAVY,
+    )
+
+    meta_hdr_right = ParagraphStyle(
+        "VajraMetaRight",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=10.5,
+        textColor=colors.HexColor("#64748B"),
+        alignment=2,
+    )
+
+    section_heading_style = ParagraphStyle(
+        "VajraSectionHeading",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8.5,
+        leading=11,
+        textColor=NAVY,
+        spaceBefore=5,
+        spaceAfter=3,
+    )
+
+    banner_score_style = ParagraphStyle(
+        "VajraBannerScore",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=15,
+        alignment=1,
+    )
+
+    banner_brief_style = ParagraphStyle(
+        "VajraBannerBrief",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=14,  # Exact 14pt leading
+        textColor=CHARCOAL,
+        alignment=0,
+    )
+
+    custody_label_style = ParagraphStyle(
+        "VajraCustodyLabel",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=10,
+        textColor=NAVY,
+    )
+
+    custody_val_style = ParagraphStyle(
+        "VajraCustodyVal",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=10,
+        textColor=CHARCOAL,
+    )
+
+    custody_mono_style = ParagraphStyle(
+        "VajraCustodyMono",
+        parent=styles["Normal"],
+        fontName="Courier",
+        fontSize=7,
+        leading=9.5,
+        textColor=CHARCOAL,
+    )
+
+    th_style = ParagraphStyle(
+        "VajraTH",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=9.5,
+        textColor=NAVY,
+        alignment=1,
+    )
+
+    td_center_style = ParagraphStyle(
+        "VajraTDCenter",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7,
+        leading=9,
+        alignment=1,
+        textColor=CHARCOAL,
+    )
+
+    td_left_style = ParagraphStyle(
+        "VajraTDLeft",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7,
+        leading=9,
+        textColor=CHARCOAL,
+    )
+
+    td_mono_style = ParagraphStyle(
+        "VajraTDMono",
+        parent=styles["Normal"],
+        fontName="Courier",
+        fontSize=6.5,
+        leading=8.5,
+        textColor=CHARCOAL,
+    )
+
+    penalty_rule_style = ParagraphStyle(
+        "VajraPenaltyRule",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=9.5,
+        textColor=CRIMSON,
+    )
+
+    penalty_pts_style = ParagraphStyle(
+        "VajraPenaltyPts",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        textColor=CRIMSON,
+        alignment=1,
+    )
+
+    penalty_reason_style = ParagraphStyle(
+        "VajraPenaltyReason",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7,
+        leading=9,
+        textColor=CHARCOAL,
+    )
+
+    story = []
+
+    # 1. Header Line
+    utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    hdr_left = Paragraph(
+        f"<b>VAJRA FORENSIC DOSSIER</b><br/><font size=7 color='#64748B'>CASE ID: {_pdf_sanitize(case_id)}</font>",
+        doc_title_style,
+    )
+    hdr_right = Paragraph(
+        f"Generated: {utc_now} UTC<br/>Problem Statement: SIH2026 - SHS0106",
+        meta_hdr_right,
+    )
+    hdr_table = Table([[hdr_left, hdr_right]], colWidths=[3.5 * inch, 3.5 * inch])
+    hdr_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(hdr_table)
+    story.append(Spacer(1, 4))
+
+    # Prominent DLP Bypass Security Alert Banner if operator disabled privacy shield
+    dlp_sec = case_intel.get("dlp_security", {})
+    dlp_bypassed = (
+        (isinstance(dlp_sec, dict) and dlp_sec.get("status") == "BYPASSED")
+        or (isinstance(dlp_sec, dict) and dlp_sec.get("masking_active") is False)
+        or (case_intel.get("dlp_masking") is False)
+    )
+    if dlp_bypassed:
+        dlp_alert_hdr = ParagraphStyle(
+            "VajraDlpAlertHdr",
+            parent=styles["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=8,
+            leading=10,
+            textColor=CRIMSON,
+            alignment=1,
+        )
+        dlp_alert_sub = ParagraphStyle(
+            "VajraDlpAlertSub",
+            parent=styles["Normal"],
+            fontName="Helvetica",
+            fontSize=6.5,
+            leading=8.5,
+            textColor=colors.HexColor("#7F1D1D"),
+            alignment=1,
+        )
+        dlp_p1 = Paragraph("⚠️ FORENSIC INTEGRITY NOTICE: DLP PRIVACY SHIELD WAS BYPASSED FOR THIS INVESTIGATION.", dlp_alert_hdr)
+        dlp_p2 = Paragraph("Raw evidence processed without PII scrubbing. Platform disclaims legal liability for data exposure or regulatory non-compliance.", dlp_alert_sub)
+        dlp_alert_table = Table([[dlp_p1], [dlp_p2]], colWidths=[7.0 * inch])
+        dlp_alert_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), CRIMSON_BG),
+            ("BOX", (0, 0), (-1, -1), 1.2, CRIMSON),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(dlp_alert_table)
+        story.append(Spacer(1, 4))
+
+    # 2. Verdict Banner
+    banner_score = Paragraph(
+        f"<font color='{threat_color.hexval()}'><b>[ SCORE: {score} / 100 ] — {verdict_label}</b></font>",
+        banner_score_style,
+    )
+    banner_brief = Paragraph(_pdf_sanitize(llm_summary), banner_brief_style)
+    banner_table = Table([[banner_score], [banner_brief]], colWidths=[7.0 * inch])
+    banner_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), threat_bg),
+        ("BOX", (0, 0), (-1, -1), 1.2, threat_color),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, threat_color),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(banner_table)
+    story.append(Spacer(1, 6))
+
+    # 3. Cryptographic Chain of Custody Table
+    story.append(Paragraph("CRYPTOGRAPHIC CHAIN OF CUSTODY", section_heading_style))
+    custody_data = [
+        [Paragraph("Subject:", custody_label_style), Paragraph(_pdf_sanitize(subject), custody_val_style)],
+        [Paragraph("Envelope From:", custody_label_style), Paragraph(_pdf_sanitize(sender), custody_val_style)],
+        [Paragraph("Display Name:", custody_label_style), Paragraph(_pdf_sanitize(sender_display_name), custody_val_style)],
+        [Paragraph("Candidate Origin IP:", custody_label_style), Paragraph(_pdf_sanitize(earliest_public_ip), custody_mono_style)],
+        [Paragraph("Message-ID:", custody_label_style), Paragraph(_pdf_sanitize(message_id), custody_mono_style)],
+        [Paragraph("Evidence SHA-256 Hash:", custody_label_style), Paragraph(_pdf_sanitize(sha256), custody_mono_style)],
+    ]
+    custody_table = Table(custody_data, colWidths=[1.8 * inch, 5.2 * inch])
+    custody_table_style = [
+        ("GRID", (0, 0), (-1, -1), 0.5, SLATE_BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]
+    for r in range(len(custody_data)):
+        bg = ROW_ALT if r % 2 == 1 else WHITE
+        custody_table_style.append(("BACKGROUND", (0, r), (-1, r), bg))
+    custody_table.setStyle(TableStyle(custody_table_style))
+    story.append(custody_table)
+    story.append(Spacer(1, 6))
+
+    # 4. Authentication Matrix Table
+    story.append(Paragraph("CRYPTOGRAPHIC &amp; DNS AUTHENTICATION MATRIX", section_heading_style))
+    def _auth_card(title: str, rfc: str, st: str, det: str) -> Paragraph:
+        st_u = st.upper()
+        if st_u == "PASS":
+            c_hex = "#16A34A"
+        elif st_u in ("FAIL", "SOFTFAIL"):
+            c_hex = "#DC2626"
+        elif st_u in ("NONE", "MISSING", "UNKNOWN", "UNVERIFIABLE"):
+            c_hex = "#D97706"
         else:
-            return f'<span class="status-pill status-neutral">{html.escape(s)}</span>'
+            c_hex = "#64748B"
+        return Paragraph(
+            f"<b>{title}</b> <font size=6.5 color='#64748B'>({rfc})</font><br/>"
+            f"<font color='{c_hex}'><b>[{st_u}]</b></font><br/>"
+            f"<font size=6.5 color='#475569'>{_pdf_sanitize(det)}</font>",
+            td_left_style,
+        )
 
-    # Reverse hop table rows
-    hop_rows = []
+    spf_st = str(spf.get("status", "NONE"))
+    spf_dt = str(spf.get("details") or spf.get("record") or "No SPF details recorded")
+    dkim_st = str(dkim.get("status", "NONE"))
+    dkim_dt = str(dkim.get("details") or "No DKIM signature verified")
+    dmarc_st = str(dmarc.get("status", "NONE"))
+    dmarc_pol = str(dmarc.get("policy", "none"))
+    dmarc_dt = str(dmarc.get("details") or f"Policy enforcement: {dmarc_pol}")
+
+    auth_data = [
+        [
+            _auth_card("SPF Verification", "RFC 7208", spf_st, spf_dt),
+            _auth_card("DKIM Signature", "RFC 6376", dkim_st, dkim_dt),
+            _auth_card("DMARC Enforcement", "RFC 7489", dmarc_st, dmarc_dt),
+        ]
+    ]
+    auth_table = Table(auth_data, colWidths=[2.3 * inch, 2.3 * inch, 2.4 * inch])
+    auth_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, SLATE_BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(auth_table)
+    story.append(Spacer(1, 6))
+
+    # 5. Reverse MTA Hop Traversal Table
+    story.append(Paragraph("REVERSE MTA HOP TRAVERSAL (ORIGIN PINPOINTING)", section_heading_style))
+    hop_col_widths = [0.5 * inch, 1.3 * inch, 1.8 * inch, 1.8 * inch, 0.8 * inch, 0.8 * inch]
+    hop_headers = [
+        Paragraph("Hop #", th_style),
+        Paragraph("Relay IP", th_style),
+        Paragraph("Geolocation", th_style),
+        Paragraph("ASN / ISP", th_style),
+        Paragraph("Tor Node", th_style),
+        Paragraph("Delay", th_style),
+    ]
+    hop_table_data = [hop_headers]
     if hops:
         for h in hops:
-            hop_num = h.get("hop_number", "-")
-            ip = html.escape(str(h.get("ip", "-")))
+            h_num = Paragraph(f"#{h.get('hop_number', '-')}", td_center_style)
+            h_ip = Paragraph(_pdf_sanitize(h.get("ip", "-")), td_mono_style)
             loc = f"{h.get('city') or 'Unknown'}, {h.get('country') or 'Unknown'}"
-            asn_org = html.escape(str(h.get("asn_org") or "-"))
-            is_tor = '<span class="status-pill status-fail">TOR EXIT</span>' if h.get("is_tor_exit") else '<span class="status-pill status-pass">CLEAN</span>'
-            delay = f"{h.get('delay_seconds'):.1f}s" if h.get("delay_seconds") is not None else "-"
-            hop_rows.append(f"""
-                <tr>
-                    <td style="font-weight: 600; text-align: center;">#{hop_num}</td>
-                    <td class="mono">{ip}</td>
-                    <td>{loc}</td>
-                    <td>{asn_org}</td>
-                    <td style="text-align: center;">{is_tor}</td>
-                    <td style="text-align: right;">{delay}</td>
-                </tr>
-            """)
+            h_loc = Paragraph(_pdf_sanitize(loc), td_left_style)
+            asn_val = h.get("asn_org") or (f"AS{h.get('asn')}" if h.get("asn") else "-")
+            h_asn = Paragraph(_pdf_sanitize(asn_val), td_left_style)
+            if h.get("is_tor_exit"):
+                h_tor = Paragraph("<font color='#DC2626'><b>TOR EXIT</b></font>", td_center_style)
+            else:
+                h_tor = Paragraph("<font color='#16A34A'>CLEAN</font>", td_center_style)
+            d_val = f"{h.get('delay_seconds'):.1f}s" if h.get("delay_seconds") is not None else "-"
+            h_del = Paragraph(d_val, td_center_style)
+            hop_table_data.append([h_num, h_ip, h_loc, h_asn, h_tor, h_del])
     else:
-        hop_rows.append("<tr><td colspan='6' style='text-align: center; color: #94a3b8;'>No public MTA hops identified in header traversal.</td></tr>")
+        empty_hop = Paragraph("No public MTA relays identified in header traversal.", td_center_style)
+        hop_table_data.append([empty_hop, "", "", "", "", ""])
 
-    # Penalties rows
-    penalty_rows = []
+    hop_table = Table(hop_table_data, colWidths=hop_col_widths)
+    hop_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), SLATE_HEADER),
+        ("GRID", (0, 0), (-1, -1), 0.5, SLATE_BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]
+    if not hops:
+        hop_style.append(("SPAN", (0, 1), (5, 1)))
+        hop_style.append(("BACKGROUND", (0, 1), (-1, 1), WHITE))
+    else:
+        for r in range(1, len(hop_table_data)):
+            bg = ROW_ALT if r % 2 == 1 else WHITE
+            hop_style.append(("BACKGROUND", (0, r), (-1, r), bg))
+    hop_table.setStyle(TableStyle(hop_style))
+    story.append(hop_table)
+    story.append(Spacer(1, 6))
+
+    # 6. Itemized Risk Deductions Table
+    story.append(Paragraph("ITEMIZED THREAT DEDUCTIONS &amp; HEURISTICS", section_heading_style))
+    deduction_col_widths = [1.8 * inch, 0.8 * inch, 4.4 * inch]
+    deduction_headers = [
+        Paragraph("Rule Code", th_style),
+        Paragraph("Penalty", th_style),
+        Paragraph("Forensic Justification", th_style),
+    ]
+    deduction_table_data = [deduction_headers]
     if penalties:
         for p in penalties:
-            rule = html.escape(str(p.get("rule", "-")))
-            pts = f"+{p.get('penalty', 0)}"
-            reason = html.escape(str(p.get("reason", "-")))
-            penalty_rows.append(f"""
-                <tr>
-                    <td style="font-weight: 600; color: #f87171;">{rule}</td>
-                    <td style="font-weight: bold; color: #ef4444; text-align: center;">{pts}</td>
-                    <td style="color: #cbd5e1;">{reason}</td>
-                </tr>
-            """)
+            r_rule = Paragraph(_pdf_sanitize(p.get("rule", "-")), penalty_rule_style)
+            r_pts = Paragraph(f"+{p.get('penalty', 0)}", penalty_pts_style)
+            r_reason = Paragraph(_pdf_sanitize(p.get("reason", "-")), penalty_reason_style)
+            deduction_table_data.append([r_rule, r_pts, r_reason])
     else:
-        penalty_rows.append("<tr><td colspan='3' style='text-align: center; color: #34d399; font-weight: 500;'>Clean Audit: Zero threat penalties triggered.</td></tr>")
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VAJRA Forensic Intelligence Dossier - {case_id}</title>
-    <!-- Client-side html2pdf.js for direct 1-click PDF generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <style>
-        :root {{
-            --bg-primary: #0b0f19;
-            --bg-card: #131b2e;
-            --bg-card-alt: #1a243b;
-            --border-color: #243252;
-            --text-main: #f1f5f9;
-            --text-muted: #94a3b8;
-            --accent-cyan: #06b6d4;
-            --accent-blue: #3b82f6;
-        }}
-
-        * {{
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }}
-
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-primary);
-            color: var(--text-main);
-            line-height: 1.5;
-            padding: 30px 20px;
-        }}
-
-        .container {{
-            max-width: 1000px;
-            margin: 0 auto;
-        }}
-
-        .top-bar {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 25px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid var(--border-color);
-        }}
-
-        .brand-logo {{
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }}
-
-        .brand-title {{
-            font-size: 24px;
-            font-weight: 800;
-            letter-spacing: 1.5px;
-            color: #ffffff;
-        }}
-
-        .brand-title span {{
-            color: var(--accent-cyan);
-        }}
-
-        .brand-sub {{
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--text-muted);
-        }}
-
-        .btn-print {{
-            background: linear-gradient(135deg, #0284c7, #2563eb);
-            color: #ffffff;
-            border: none;
-            padding: 10px 20px;
-            font-size: 14px;
-            font-weight: 600;
-            border-radius: 6px;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.2s ease;
-        }}
-
-        .btn-print:hover {{
-            opacity: 0.9;
-            transform: translateY(-1px);
-        }}
-
-        .btn-print:disabled {{
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }}
-
-        .action-group {{
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 6px;
-        }}
-
-        .print-fallback-link {{
-            font-size: 11px;
-            color: var(--text-muted);
-            text-decoration: underline;
-            cursor: pointer;
-            transition: color 0.2s ease;
-        }}
-
-        .print-fallback-link:hover {{
-            color: var(--accent-cyan);
-        }}
-
-        .card {{
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-        }}
-
-        .card-header {{
-            font-size: 15px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--accent-cyan);
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }}
-
-        .mono {{
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-            font-size: 13px;
-            word-break: break-all;
-        }}
-
-        /* Grid layouts */
-        .grid-2 {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-        }}
-
-        .grid-3 {{
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-        }}
-
-        .meta-item {{
-            margin-bottom: 10px;
-        }}
-
-        .meta-label {{
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--text-muted);
-            margin-bottom: 2px;
-        }}
-
-        .meta-val {{
-            font-size: 14px;
-            color: var(--text-main);
-            font-weight: 500;
-        }}
-
-        /* Threat Hero Section */
-        .threat-banner {{
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 20px;
-            background: var(--bg-card-alt);
-            border-radius: 8px;
-            border-left: 6px solid {badge_bg};
-            margin-bottom: 20px;
-        }}
-
-        .threat-score-box {{
-            display: flex;
-            align-items: baseline;
-            gap: 6px;
-        }}
-
-        .threat-score-num {{
-            font-size: 48px;
-            font-weight: 900;
-            color: {verdict_color};
-            line-height: 1;
-        }}
-
-        .threat-score-max {{
-            font-size: 18px;
-            color: var(--text-muted);
-        }}
-
-        .verdict-badge {{
-            display: inline-block;
-            background-color: {badge_bg};
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 800;
-            letter-spacing: 1.5px;
-            padding: 6px 16px;
-            border-radius: 50px;
-            text-transform: uppercase;
-        }}
-
-        .analyst-brief {{
-            font-size: 14px;
-            line-height: 1.6;
-            color: #e2e8f0;
-            background: rgba(15, 23, 42, 0.6);
-            padding: 16px;
-            border-radius: 6px;
-            border-left: 4px solid var(--accent-cyan);
-        }}
-
-        /* Tables */
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }}
-
-        th {{
-            background: var(--bg-card-alt);
-            color: var(--text-muted);
-            text-align: left;
-            padding: 10px 14px;
-            font-weight: 600;
-            text-transform: uppercase;
-            font-size: 11px;
-            letter-spacing: 0.5px;
-            border-bottom: 1px solid var(--border-color);
-        }}
-
-        td {{
-            padding: 12px 14px;
-            border-bottom: 1px solid rgba(36, 50, 82, 0.5);
-            vertical-align: middle;
-        }}
-
-        tr:last-child td {{
-            border-bottom: none;
-        }}
-
-        /* Status Pills */
-        .status-pill {{
-            display: inline-block;
-            padding: 3px 8px;
-            font-size: 11px;
-            font-weight: 700;
-            border-radius: 4px;
-            text-transform: uppercase;
-        }}
-
-        .status-pass {{
-            background-color: rgba(16, 185, 129, 0.2);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.4);
-        }}
-
-        .status-fail {{
-            background-color: rgba(239, 68, 68, 0.2);
-            color: #f87171;
-            border: 1px solid rgba(239, 68, 68, 0.4);
-        }}
-
-        .status-warn {{
-            background-color: rgba(245, 158, 11, 0.2);
-            color: #fbbf24;
-            border: 1px solid rgba(245, 158, 11, 0.4);
-        }}
-
-        .status-neutral {{
-            background-color: rgba(148, 163, 184, 0.2);
-            color: #cbd5e1;
-            border: 1px solid rgba(148, 163, 184, 0.4);
-        }}
-
-        .auth-card {{
-            background: var(--bg-card-alt);
-            padding: 14px;
-            border-radius: 6px;
-            border: 1px solid var(--border-color);
-        }}
-
-        .auth-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }}
-
-        .auth-name {{
-            font-weight: 700;
-            font-size: 13px;
-        }}
-
-        .auth-desc {{
-            font-size: 12px;
-            color: var(--text-muted);
-            line-height: 1.4;
-        }}
-
-        .footer {{
-            text-align: center;
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 30px;
-            padding-top: 15px;
-            border-top: 1px solid var(--border-color);
-        }}
-
-        /* Print Specific CSS */
-        @media print {{
-            body {{
-                background-color: #ffffff !important;
-                color: #0f172a !important;
-                padding: 0 !important;
-            }}
-
-            .no-print {{
-                display: none !important;
-            }}
-
-            .card {{
-                background: #ffffff !important;
-                border: 1px solid #cbd5e1 !important;
-                box-shadow: none !important;
-                page-break-inside: avoid;
-                margin-bottom: 16px !important;
-                padding: 16px !important;
-            }}
-
-            .brand-title, .brand-title span {{
-                color: #0f172a !important;
-            }}
-
-            .threat-banner {{
-                background: #f8fafc !important;
-                border: 1px solid #cbd5e1 !important;
-                border-left: 6px solid {badge_bg} !important;
-            }}
-
-            .meta-val, .mono {{
-                color: #0f172a !important;
-            }}
-
-            th {{
-                background: #f1f5f9 !important;
-                color: #334155 !important;
-            }}
-
-            td {{
-                color: #1e293b !important;
-                border-bottom: 1px solid #e2e8f0 !important;
-            }}
-
-            .auth-card {{
-                background: #f8fafc !important;
-                border: 1px solid #cbd5e1 !important;
-            }}
-
-            .analyst-brief {{
-                background: #f8fafc !important;
-                color: #1e293b !important;
-                border: 1px solid #cbd5e1 !important;
-                border-left: 4px solid var(--accent-blue) !important;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="container" id="report-container">
-        <!-- Top Action Bar -->
-        <div class="top-bar" id="action-bar">
-            <div class="brand-logo">
-                <div>
-                    <div class="brand-title">VAJRA <span>FORENSICS</span></div>
-                    <div class="brand-sub">SIH26106 Email Threat Intelligence Platform</div>
-                </div>
-            </div>
-            <div class="action-group no-print">
-                <button id="btn-download-pdf" class="btn-print" onclick="downloadDirectPdf()">
-                    <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
-                        <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
-                    </svg>
-                    Download PDF Report
-                </button>
-                <a href="javascript:void(0)" onclick="window.print()" class="print-fallback-link">or use Browser Print</a>
-            </div>
-        </div>
-
-        <!-- Threat Score & Executive Summary -->
-        <div class="card">
-            <div class="card-header">
-                <span>Threat Verdict & Executive Briefing</span>
-                <span style="font-size: 12px; color: var(--text-muted); font-weight: normal;">Case Dossier: {case_id}</span>
-            </div>
-
-            <div class="threat-banner">
-                <div>
-                    <div class="threat-score-box">
-                        <span class="threat-score-num">{score}</span>
-                        <span class="threat-score-max">/ 100</span>
-                    </div>
-                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Computed Forensic Risk Index</div>
-                </div>
-                <div>
-                    <span class="verdict-badge">{verdict}</span>
-                </div>
-            </div>
-
-            <div class="analyst-brief">
-                <strong>Cyber Threat Analyst Assessment:</strong><br>
-                {llm_summary}
-            </div>
-        </div>
-
-        <!-- Chain of Custody & Evidence Headers -->
-        <div class="card">
-            <div class="card-header">Cryptographic Chain of Custody</div>
-            <div class="grid-2">
-                <div>
-                    <div class="meta-item">
-                        <div class="meta-label">Subject</div>
-                        <div class="meta-val">{subject}</div>
-                    </div>
-                    <div class="meta-item">
-                        <div class="meta-label">Envelope From</div>
-                        <div class="meta-val mono">{sender}</div>
-                    </div>
-                    <div class="meta-item">
-                        <div class="meta-label">Display Name</div>
-                        <div class="meta-val">{sender_display_name}</div>
-                    </div>
-                    <div class="meta-item">
-                        <div class="meta-label">Recipient</div>
-                        <div class="meta-val mono">{recipient}</div>
-                    </div>
-                </div>
-                <div>
-                    <div class="meta-item">
-                        <div class="meta-label">Evidence SHA-256 Hash</div>
-                        <div class="meta-val mono" style="color: var(--accent-cyan);">{sha256}</div>
-                    </div>
-                    <div class="meta-item">
-                        <div class="meta-label">Origin Entry MTA IP</div>
-                        <div class="meta-val mono">{earliest_public_ip}</div>
-                    </div>
-                    <div class="meta-item">
-                        <div class="meta-label">Message-ID</div>
-                        <div class="meta-val mono">{message_id}</div>
-                    </div>
-                    <div class="meta-item">
-                        <div class="meta-label">Investigation Timestamp (UTC)</div>
-                        <div class="meta-val">{created_at}</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Protocol Authentication Matrix -->
-        <div class="card">
-            <div class="card-header">Protocol Authentication Matrix</div>
-            <div class="grid-3">
-                <div class="auth-card">
-                    <div class="auth-header">
-                        <span class="auth-name">SPF Audit</span>
-                        {auth_badge(str(spf.get('status', 'NONE')))}
-                    </div>
-                    <div class="auth-desc">{html.escape(str(spf.get('details', 'No details')))}</div>
-                </div>
-
-                <div class="auth-card">
-                    <div class="auth-header">
-                        <span class="auth-name">DKIM Crypto</span>
-                        {auth_badge(str(dkim.get('status', 'NONE')))}
-                    </div>
-                    <div class="auth-desc">{html.escape(str(dkim.get('details', 'No details')))}</div>
-                </div>
-
-                <div class="auth-card">
-                    <div class="auth-header">
-                        <span class="auth-name">DMARC Policy</span>
-                        {auth_badge(str(dmarc.get('status', 'NONE')))}
-                    </div>
-                    <div class="auth-desc">
-                        Policy: <strong>{html.escape(str(dmarc.get('policy', 'missing')))}</strong><br>
-                        {html.escape(str(dmarc.get('details', 'No details')))}
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Reverse Hop Traversal -->
-        <div class="card">
-            <div class="card-header">Chronological Reverse MTA Hop Traversal (Bottom-Up)</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 60px; text-align: center;">Hop</th>
-                        <th>Host IP Address</th>
-                        <th>Resolved Geolocation</th>
-                        <th>ASN / Infrastructure</th>
-                        <th style="text-align: center;">Tor Node</th>
-                        <th style="text-align: right;">Delay</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {"".join(hop_rows)}
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Itemized Penalties -->
-        <div class="card">
-            <div class="card-header">Itemized Deterministic Risk Deductions</div>
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 250px;">Trigger Rule</th>
-                        <th style="width: 80px; text-align: center;">Penalty</th>
-                        <th>Forensic Justification</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {"".join(penalty_rows)}
-                </tbody>
-            </table>
-        </div>
-
-        <div class="footer">
-            VAJRA Forensic Platform &bull; Smart India Hackathon 2026 Problem Statement SIH26106 &bull; Certified Evidence Dossier
-        </div>
-    </div>
-
-    <!-- 1-Click Direct Client-Side PDF Generation Script -->
-    <script>
-        function downloadDirectPdf() {{
-            const actionBar = document.getElementById('action-bar');
-            const btn = document.getElementById('btn-download-pdf');
-            const originalHtml = btn.innerHTML;
-
-            btn.innerHTML = 'Rendering PDF...';
-            btn.disabled = true;
-            actionBar.style.display = 'none';
-
-            const element = document.getElementById('report-container');
-            const opt = {{
-                margin: 10,
-                filename: 'VAJRA-Forensic-Dossier-{case_id}.pdf',
-                image: {{ type: 'jpeg', quality: 0.98 }},
-                html2canvas: {{ scale: 2, useCORS: true, logging: false }},
-                jsPDF: {{ unit: 'mm', format: 'a4', orientation: 'portrait' }}
-            }};
-
-            html2pdf().set(opt).from(element).save().then(function() {{
-                actionBar.style.display = 'flex';
-                btn.innerHTML = originalHtml;
-                btn.disabled = false;
-            }}).catch(function(err) {{
-                console.error('html2pdf export error:', err);
-                actionBar.style.display = 'flex';
-                btn.innerHTML = originalHtml;
-                btn.disabled = false;
-                window.print();
-            }});
-        }}
-    </script>
-</body>
-</html>
-"""
-
-
-def generate_404_html(case_id: str) -> str:
-    """Generate professional cyber-themed 404 page when a forensic case ID is missing."""
-    safe_case = html.escape(case_id)
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Case Not Found - VAJRA Forensics</title>
-    <style>
-        body {{
-            background: #0b0f19;
-            color: #f1f5f9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 20px;
-        }}
-        .box {{
-            background: #131b2e;
-            border: 1px solid #243252;
-            border-radius: 10px;
-            padding: 40px;
-            max-width: 500px;
-            text-align: center;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-        }}
-        h1 {{
-            color: #ef4444;
-            font-size: 28px;
-            margin-bottom: 12px;
-        }}
-        p {{
-            color: #94a3b8;
-            font-size: 14px;
-            line-height: 1.6;
-            margin-bottom: 20px;
-        }}
-        .code {{
-            font-family: monospace;
-            background: #1e293b;
-            padding: 4px 8px;
-            border-radius: 4px;
-            color: #06b6d4;
-        }}
-        a {{
-            color: #38bdf8;
-            text-decoration: none;
-            font-weight: 600;
-        }}
-        a:hover {{
-            text-decoration: underline;
-        }}
-    </style>
-</head>
-<body>
-    <div class="box">
-        <h1>Forensic Case Not Found</h1>
-        <p>The requested forensic investigation case <span class="code">{safe_case}</span> was not found in the VAJRA evidence registry.</p>
-        <p>Ensure the case ID was accurately entered or upload a new email for forensic examination.</p>
-        <a href="/docs">Return to API Documentation</a>
-    </div>
-</body>
-</html>
-"""
+        empty_p = Paragraph("<font color='#16A34A'><b>Clean Audit: Zero threat penalties triggered.</b></font>", td_center_style)
+        deduction_table_data.append([empty_p, "", ""])
+
+    deduction_table = Table(deduction_table_data, colWidths=deduction_col_widths)
+    ded_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), SLATE_HEADER),
+        ("GRID", (0, 0), (-1, -1), 0.5, SLATE_BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]
+    if not penalties:
+        ded_style.append(("SPAN", (0, 1), (2, 1)))
+        ded_style.append(("BACKGROUND", (0, 1), (-1, 1), WHITE))
+    else:
+        for r in range(1, len(deduction_table_data)):
+            bg = ROW_ALT if r % 2 == 1 else WHITE
+            ded_style.append(("BACKGROUND", (0, r), (-1, r), bg))
+    deduction_table.setStyle(TableStyle(ded_style))
+    story.append(deduction_table)
+
+    # 7. Running Footer Callback
+    def _add_running_footer(canvas, doc_obj):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(colors.HexColor("#64748B"))
+        canvas.drawString(36, 18, "Certified Digital Forensic Dossier | VAJRA Forensic Platform (Air-Gapped Ingestion)")
+        canvas.drawRightString(A4[0] - 36, 18, f"Page {doc_obj.page}")
+        canvas.setStrokeColor(SLATE_BORDER)
+        canvas.setLineWidth(0.5)
+        canvas.line(36, 26, A4[0] - 36, 26)
+        canvas.restoreState()
+
+    # Build document into in-memory buffer
+    doc.build(story, onFirstPage=_add_running_footer, onLaterPages=_add_running_footer)
+    return buffer.getvalue()
+
+
+# Alias for backward and forward compatibility
+generate_pdf_report = generate_case_pdf

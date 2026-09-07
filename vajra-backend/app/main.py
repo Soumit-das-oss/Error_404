@@ -1,8 +1,13 @@
+"""
+VAJRA Forensic Platform - High-Performance Air-Gapped API Entry Point
+SIH Problem Statement 26106 | Zero Disk Database | Pure In-Memory Forensic Intelligence
+"""
+
 import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any
-import httpx
+
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,13 +15,11 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from sqlalchemy import text
 from app.core.config import settings
-from app.core.database import init_db, engine
-from app.services.threat_intel import load_tor_exit_nodes
-from app.api.v1.api import api_router
+from app.storage.memory_store import case_store
+from app.api.v1.router import router as api_v1_router
 
-# Configure logging
+# Configure platform-wide logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -26,38 +29,27 @@ logger = logging.getLogger("vajra.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for initialization and graceful shutdown."""
-    logger.info("=" * 60)
-    logger.info("Initializing VAJRA Forensic Intelligence API...")
+    """Application lifespan manager for air-gapped forensic engine."""
+    logger.info("=" * 65)
+    logger.info("Initializing VAJRA Forensic Email Intelligence Engine...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
-    logger.info(f"Payload ceiling: {settings.MAX_PAYLOAD_BYTES // (1024 * 1024)} MB")
-    logger.info("=" * 60)
-
-    # 1. Load Threat Intel Caches (Tor Exit Nodes)
-    try:
-        nodes = load_tor_exit_nodes()
-        logger.info(f"Loaded {len(nodes)} Tor exit node signatures.")
-    except Exception as e:
-        logger.warning(f"Failed to load Tor exit node cache: {e}")
-
-    # 2. Verify / Initialize Database Schema
-    await init_db()
+    logger.info(f"Payload Ceiling: {settings.MAX_PAYLOAD_BYTES // (1024 * 1024)} MB")
+    logger.info("Storage Architecture: Thread-Safe RAM FIFO Case Store (Capacity: 25)")
+    logger.info(f"Threat Intel MMDB: {settings.GEOLITE2_CITY_PATH.exists()}")
+    logger.info("=" * 65)
 
     yield
 
-    # Graceful shutdown
-    logger.info("Disposing database engine pools...")
-    await engine.dispose()
-    logger.info("VAJRA API shutdown complete.")
+    logger.info("VAJRA Forensic Platform shutdown complete.")
 
 
 def create_app() -> FastAPI:
-    """Factory function for FastAPI application instance."""
+    """FastAPI application factory."""
     app = FastAPI(
         title=settings.PROJECT_NAME,
-        version="1.0.0",
+        version="2.0.0",
         description=(
-            "Production-grade headless REST API for AI-Powered Email Threat Detection, "
+            "Air-gapped, zero-database REST API for AI-Powered Email Threat Detection, "
             "GeoLocation, and Forensic Intelligence Platform (SIH 2026 - Problem Statement SIH26106)."
         ),
         docs_url="/docs",
@@ -66,7 +58,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS Middleware configuration for frontend integration (Vite / Next.js / React)
+    # CORS Middleware configuration for web dashboards and SOC frontends
     cors_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -88,10 +80,21 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Register API v1 Router
-    app.include_router(api_router, prefix=settings.API_V1_STR)
+    # In-flight default parameter normalization for programmatic clients
+    @app.middleware("http")
+    async def default_dlp_query_param(request: Request, call_next):
+        path = request.url.path
+        if path in ("/api/v1/raw", "/api/v1/upload", "/api/v1/analyze/raw", "/api/v1/analyze/upload"):
+            if "dlp_masking" not in request.query_params:
+                qs = request.scope.get("query_string", b"").decode("latin-1")
+                new_qs = f"{qs}&dlp_masking=true" if qs else "dlp_masking=true"
+                request.scope["query_string"] = new_qs.encode("latin-1")
+        return await call_next(request)
 
-    # Global Exception Handlers ensuring strict JSON contracts
+    # Mount API v1 Routes
+    app.include_router(api_v1_router, prefix=settings.API_V1_STR)
+
+    # Global Exception Handlers
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         return JSONResponse(
@@ -128,44 +131,28 @@ def create_app() -> FastAPI:
                 "success": False,
                 "error": {
                     "code": 500,
-                    "message": "An internal forensic engine error occurred.",
+                    "message": f"An internal forensic engine error occurred: {str(exc)}",
                 },
             },
         )
 
-    # Diagnostics & Health Check
+    # Diagnostics & System Health Endpoint
     @app.get("/health", tags=["Diagnostics"], summary="System health check and dependency telemetry")
     async def health_check() -> Dict[str, Any]:
-        # Check database connectivity
-        db_connected = False
-        try:
-            async with engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
-                db_connected = True
-        except Exception:
-            db_connected = False
-
-        # Check local Ollama connectivity
-        ollama_alive = False
-        try:
-            async with httpx.AsyncClient(timeout=1.5) as client:
-                res = await client.get(f"{settings.OLLAMA_HOST.rstrip('/')}/api/tags")
-                if res.status_code == 200:
-                    ollama_alive = True
-        except Exception:
-            ollama_alive = False
-
         return {
             "status": "online",
             "service": "VAJRA Forensic Platform Backend",
+            "version": "2.0.0",
             "timestamp": time.time(),
             "telemetry": {
-                "database_connected": db_connected,
-                "ollama_available": ollama_alive,
-                "ollama_host": settings.OLLAMA_HOST,
-                "ollama_model": settings.OLLAMA_MODEL,
+                "active_memory_cases": case_store.count,
+                "max_memory_capacity": 25,
                 "max_payload_bytes": settings.MAX_PAYLOAD_BYTES,
-                "dns_timeout_seconds": settings.DNS_TIMEOUT_SECONDS,
+                "geoip_city_available": settings.GEOLITE2_CITY_PATH.exists(),
+                "geoip_asn_available": settings.GEOLITE2_ASN_PATH.exists(),
+                "tor_cache_available": settings.TOR_EXIT_NODES_PATH.exists(),
+                "groq_configured": bool(settings.GROQ_API_KEY),
+                "ollama_url": settings.OLLAMA_URL,
             },
         }
 

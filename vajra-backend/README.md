@@ -1,68 +1,84 @@
 # VAJRA Forensics (SIH26106)
-### AI-Powered Email Threat Detection, GeoLocation & Forensic Intelligence Platform
+### Air-Gapped AI-Powered Email Threat Detection, GeoLocation & Forensic Intelligence Platform
 
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![ORM](https://img.shields.io/badge/SQLAlchemy-2.0%20Async-red.svg)](https://www.sqlalchemy.org/)
+[![Architecture](https://img.shields.io/badge/Storage-Zero--Database%20RAM%20Store-purple.svg)](app/storage/memory_store.py)
 [![Validation](https://img.shields.io/badge/Pydantic-v2.9+-E92063.svg)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/pytest-22%2F22%20Passing%20(100%25)-brightgreen.svg)](https://docs.pytest.org/)
+[![Tests](https://img.shields.io/badge/pytest-30%2F30%20Passing%20(100%25)-brightgreen.svg)](tests/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**VAJRA** is an enterprise-grade, headless cybersecurity backend platform engineered for law enforcement, digital forensics units (DFUs), Security Operations Centers (SOCs), and email security analysts. Built for **Smart India Hackathon 2026 (Problem Statement SIH26106)**, VAJRA ingests suspicious email evidence, mathematically validates cryptographic authentication headers, parses complex hop chains, pinpoints geographic origin, checks threat intelligence databases, and delivers a deterministic 0–100 risk score with a courtroom-ready forensic dossier.
+**VAJRA** is an enterprise-grade, high-performance forensic cybersecurity platform engineered for law enforcement agencies, digital forensics units (DFUs), Security Operations Centers (SOCs), and threat analysts. Built for **Smart India Hackathon 2026 (Problem Statement SIH26106)**, VAJRA features a **zero-database, air-gapped architecture** with an in-memory thread-safe FIFO case store, Data Loss Prevention (DLP) PII scrubbing, 2-tier hybrid AI reasoning with automated fallback, and certified ReportLab Platypus PDF dossier generation.
 
 ---
 
 ## Forensic Processing Pipeline
 
 ```text
-  [ Raw Email Evidence ] (.eml / .msg / RFC 822 Headers)
+  [ Raw Email Evidence ] (.eml / .msg / RFC 5322 MIME Stream)
             │
             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. Ingestion & Cryptographic Chain of Custody               │
 │    • Strict 25 MB ceiling verification                     │
-│    • Deterministic SHA-256 hash generation                  │
-│    • Unique Forensic Case ID (VAJRA-YYYYMMDD-HEX)           │
+│    • Deterministic SHA-256 evidence hashing                 │
+│    • Unique Forensic Case ID (CAS-YYYYMMDD-HEX)             │
+│    • Zero disk writes: 100% RAM buffer processing           │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. RFC 5322 Parsing & Spoofing Heuristics                   │
-│    • MIME multipart boundary unpacking                      │
-│    • Display Name Spoofing & Embedded Email Trap detection  │
-│    • Brand Impersonation analysis via Levenshtein Distance  │
+│ 2. RFC 5322 Parsing & Multipart Unpacking                   │
+│    • In-memory MIME tree decomposition (eml_parser)         │
+│    • Outlook compound binary parsing (msg_parser)           │
+│    • Body extraction (Plain text & HTML DOM parsing)        │
+│    • Cryptographic attachment hashing                       │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. Bottom-Up Hop Traversal & GeoIP Telemetry                │
+│ 3. Reverse MTA Hop Traversal & GeoIP Telemetry              │
+│    • Bottom-up chronological Received: header traversal     │
 │    • RFC 1918 Private Subnet & Loopback filtering           │
-│    • Chronological reverse Received: hop inspection         │
-│    • Originating ISP & MaxMind GeoLite2 City/ASN Resolution │
+│    • Candidate origin IP pinpointing                        │
+│    • MaxMind GeoLite2 City & ASN local binary resolution    │
+│    • Tor Exit Node verification                             │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. Threat Intel & Cryptographic Auth Matrix                 │
-│    • SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489)      │
-│    • Live Tor Exit Node matching                            │
-│    • Bulletproof / Hosting Datacenter ASN Flagging          │
+│ 4. Deep Artifact Extraction & Quishing Engine               │
+│    • PyMuPDF in-memory PDF hyperlink & anchor extraction    │
+│    • Isolated zxing-cpp QR decoder with inverted polarity   │
+│    • Deceptive URL mismatch detector (display vs href)      │
+│    • Raw IP URL & dangerous payload extension detection     │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. Deterministic Risk Engine (0-100) & Offline AI           │
-│    • Mathematically bound, capped penalty aggregation       │
-│    • Severity Classification (SAFE / MODERATE / SUSPICIOUS /│
-│      HIGH RISK / CRITICAL THREAT)                           │
-│    • Air-gapped local LLM forensic justification (Ollama)   │
+│ 5. Deterministic Risk Engine (0-100 Scale)                  │
+│    • SPF Fail (+15), DKIM Fail (+15), DMARC Fail (+15)      │
+│    • Deceptive Link (+25), Quishing QR (+40)                │
+│    • Urgency Indicators (+20), Free Webmail Lure (+35)      │
+│    • Verdict: SAFE (0-19), SUSPICIOUS (20-59), MALICIOUS    │
+│    • Hard Forensic Override for Quishing & Deceptive links  │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 6. Actionable Output & Courtroom Evidence Export            │
+│ 6. DLP Shield & Hybrid AI Auto-Failover                     │
+│    • DLP scrubbing: Credit Cards, IBANs, Phones, Names      │
+│    • Tier 1: Groq Cloud LLM (3.5s timeout)                  │
+│    • Tier 2: Ollama Local Air-Gapped LLM (5.0s timeout)     │
+│    • Tier 3: Deterministic 3-sentence static fallback       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 7. Certified Courtroom Dossier & REST API Delivery          │
+│    • Thread-safe RAM FIFO Case Store (Capacity: 25)         │
 │    • Machine-readable REST JSON Contracts                   │
-│    • 1-Click Direct Download A4 PDF Forensic Dossier        │
+│    • Certified ReportLab Platypus A4 PDF Dossier Stream     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -70,31 +86,19 @@
 
 ## Key Forensic Capabilities
 
-- **Air-Gapped & Privacy-Preserving**: Complete local execution with zero third-party cloud data leakage. Operates securely in isolated digital forensic lab environments.
+- **Zero-Database Architecture**: Eliminates database configuration, ORM locks, and disk migration issues. Case state is managed in a high-concurrency, thread-safe RAM FIFO store.
+- **Air-Gapped Privacy & DLP Shield**: Automatically sanitizes sensitive PII (Credit Cards, IBANs, Phone Numbers, and Personal Names) before passing telemetry to AI reasoning engines.
+- **Resilient AI Auto-Failover**:
+  - **Tier 1**: Groq cloud API client with strict 3.5s timeout for low latency.
+  - **Tier 2**: Ollama air-gapped local endpoint (`http://localhost:11434/api/generate`) with 5.0s timeout.
+  - **Tier 3**: Deterministic forensic briefing template guaranteed to execute with zero network access.
 - **Dual Ingestion Pathways**:
   - Binary multipart upload supporting standard RFC 5322 `.eml` and Microsoft Outlook `.msg` files.
-  - REST JSON payload ingestion for raw header and body text strings.
-- **Cryptographic Chain of Custody**: Immediate SHA-256 evidence hashing prevents evidence repudiation and establishes legal defensibility.
-- **Defensive Bottom-Up Hop Analysis**: RFC-compliant hop extraction filters out non-routable private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`) to reliably expose true foreign relays.
-- **Live MaxMind GeoIP & ASN Resolution**: Local binary database resolution (`GeoLite2-City.mmdb`, `GeoLite2-ASN.mmdb`) with graceful fallback to mock telemetry when databases are offline.
-- **Threat Intelligence Feeds**: Real-time cross-referencing against verified Tor exit nodes and suspicious hosting providers.
-- **Cryptographic Authentication Matrix**: Comprehensive validation of SPF, DKIM public-key signatures, and domain DMARC alignment policies.
-- **Display Name & Brand Impersonation Defense**: Identifies deceptive display names (e.g., `"CEO <attacker@evil.com>"` or typosquatted brand domains).
-- **Courtroom-Ready PDF Dossier**: Built-in 1-click A4 forensic report generator featuring executive summary, visual hop breakdown, threat vectors, and investigative recommendations.
-
----
-
-## Database Decoupling: SQLite vs. PostgreSQL
-
-VAJRA utilizes an asynchronous SQLAlchemy 2.0 storage layer decoupled from specific database engines:
-
-1. **Embedded SQLite (`sqlite+aiosqlite`) — Default**:
-   - Zero-RAM, zero-daemon configuration.
-   - Ideal for rapid local development, laptop triage, and offline hackathon testing.
-   - Out-of-the-box storage in `vajra.db`.
-2. **Enterprise PostgreSQL (`postgresql+asyncpg`)**:
-   - High-concurrency production storage with connection pooling.
-   - Configured seamlessly via `DATABASE_URL` in `.env` or via Docker Compose.
+  - Raw RFC 5322 plain text and JSON payload ingestion with control character crash protection.
+- **Defensive Bottom-Up Hop Analysis**: RFC-compliant hop extraction filters out non-routable private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`) to expose true external transit relays.
+- **Local Threat Intelligence**: MaxMind GeoIP/ASN MMDB binary resolution and curated Tor exit node matching.
+- **Quishing Defense**: Uses `zxing-cpp` with dual contrast passes (including inverted polarity) to decode dark-mode QR codes in image attachments and PDF pages.
+- **Certified PDF Dossier**: Produces an executive-grade Platypus PDF report in-memory with cryptographic hashes and running header/footer chain of custody.
 
 ---
 
@@ -102,16 +106,14 @@ VAJRA utilizes an asynchronous SQLAlchemy 2.0 storage layer decoupled from speci
 
 The interactive Swagger UI documentation is available at `http://localhost:8000/docs`, and OpenAPI 3.1 JSON is accessible at `http://localhost:8000/api/v1/openapi.json`.
 
-| Method | Endpoint | Description | Auth Required |
+| Method | Endpoint | Description | Payload / Params |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | System health check and telemetry status | No |
-| `POST` | `/api/v1/auth/register` | Register a forensic investigator account | No |
-| `POST` | `/api/v1/auth/login` | Authenticate and obtain JWT bearer token (supports JSON & Swagger OAuth form) | No |
-| `POST` | `/api/v1/analyze/upload` | Upload `.eml` or `.msg` binary files for automated forensic analysis | Optional / Bearer |
-| `POST` | `/api/v1/analyze/raw` | Submit raw RFC headers and body strings via JSON payload | Optional / Bearer |
-| `GET` | `/api/v1/analyze/cases` | Paginated listing of forensic investigation cases | Optional / Bearer |
-| `GET` | `/api/v1/analyze/cases/{id}` | Retrieve complete forensic dossier for a specific case ID | Optional / Bearer |
-| `GET` | `/api/v1/analyze/cases/{id}/report` | Render 1-click downloadable A4 PDF forensic evidence dossier | Optional / Bearer |
+| `GET` | `/health` | System health check and telemetry status | None |
+| `POST` | `/api/v1/upload` | Upload `.eml` or `.msg` binary file | `multipart/form-data` (`file`, `dlp_masking`) |
+| `POST` | `/api/v1/raw` | Ingest raw RFC 5322 email string or stream | `application/json` or `text/plain` |
+| `GET` | `/api/v1/cases` | Paginated listing of recent forensic cases | `page` (default: 1), `limit` (default: 25) |
+| `GET` | `/api/v1/cases/{case_id}` | Retrieve complete forensic case by ID | Path parameter: `case_id` |
+| `GET` | `/api/v1/cases/{case_id}/pdf` | Stream certified forensic PDF dossier | Path parameter: `case_id` |
 
 ---
 
@@ -120,53 +122,59 @@ The interactive Swagger UI documentation is available at `http://localhost:8000/
 ```text
 vajra-backend/
 ├── app/
+│   ├── analyzers/
+│   │   ├── pdf_engine.py          # PyMuPDF in-memory PDF links & image extraction
+│   │   ├── qr_engine.py           # zxing-cpp QR/Quishing decoder with inversion
+│   │   ├── text_analyzer.py       # Urgency indicators & free webmail impersonation
+│   │   └── url_analyzer.py        # Deceptive anchor mismatch & raw IP analysis
 │   ├── api/
 │   │   └── v1/
-│   │       ├── endpoints/
-│   │       │   ├── analyze.py         # Forensic analysis & ingestion endpoints
-│   │       │   └── auth.py            # User registration & JWT authentication
-│   │       └── api.py                 # API v1 central router
+│   │       ├── analyze_routes.py  # /upload and /raw ingestion endpoints
+│   │       ├── cases_routes.py    # /cases query & pagination endpoints
+│   │       ├── report_routes.py   # /cases/{case_id}/pdf streaming endpoint
+│   │       ├── router.py          # API v1 central router
+│   │       └── api.py             # Router re-export
 │   ├── core/
-│   │   ├── config.py                  # Pydantic Settings & environment validation
-│   │   ├── database.py                # Async SQLAlchemy engine & session factory
-│   │   └── security.py                # Password hashing & JWT token management
-│   ├── models/
-│   │   ├── case.py                    # EmailCase SQLAlchemy ORM model
-│   │   └── user.py                    # User SQLAlchemy ORM model
+│   │   ├── config.py              # Pydantic Settings & environment validation
+│   │   └── constants.py           # Penalty weights, heuristic regexes & templates
+│   ├── parsers/
+│   │   ├── eml_parser.py          # RFC 5322 MIME stream parser
+│   │   ├── msg_parser.py          # Outlook .msg compound file parser
+│   │   └── header_engine.py       # Bottom-up hop tracer & auth auditor (SPF/DKIM/DMARC)
 │   ├── schemas/
-│   │   ├── analyze.py                 # Pydantic forensic request/response schemas
-│   │   ├── token.py                   # JWT token schemas
-│   │   └── user.py                    # User account schemas
+│   │   └── analysis.py            # Pydantic forensic request/response DTO schemas
 │   ├── services/
-│   │   ├── auth_verifier.py           # SPF / DKIM / DMARC verification
-│   │   ├── explainer.py               # Deterministic rule & Ollama LLM explanations
-│   │   ├── geoip.py                   # MaxMind GeoLite2 binary IP/ASN resolver
-│   │   ├── hops.py                    # RFC 5322 Received: hop traversal & parser
-│   │   ├── parser.py                  # EML / MSG extraction & spoofing detection
-│   │   ├── report_generator.py        # 1-Click A4 PDF forensic report template
-│   │   ├── risk_scorer.py             # 0-100 Risk engine with penalty ceilings
-│   │   └── threat_intel.py            # Tor exit node & Datacenter ASN lookup
-│   └── main.py                        # FastAPI application entrypoint & lifespan
+│   │   ├── ai/
+│   │   │   ├── explainer_orchestrator.py # AI failover manager & prompt builder
+│   │   │   ├── groq_provider.py          # Async Groq client (3.5s timeout)
+│   │   │   └── ollama_provider.py        # Async Ollama client (5.0s timeout)
+│   │   ├── dlp_shield.py          # PII scrubbing (Cards, IBANs, Phones, Names)
+│   │   ├── report_generator.py    # ReportLab Platypus forensic PDF generator
+│   │   └── risk_scorer.py         # Deterministic 0-100 scoring & verdicts
+│   ├── storage/
+│   │   └── memory_store.py        # Thread-safe RAM FIFO case store (capacity: 25)
+│   └── main.py                    # FastAPI application entrypoint & lifespan
 ├── data/
-│   ├── .gitkeep                       # Preserves directory in git
-│   ├── tor_exit_nodes.txt             # Verified Tor exit node cache
-│   ├── GeoLite2-City.mmdb             # (Auto-downloaded, ignored by git)
-│   └── GeoLite2-ASN.mmdb              # (Auto-downloaded, ignored by git)
+│   ├── .gitkeep                   # Preserves data directory
+│   ├── tor_exit_nodes.txt         # Verified Tor exit node cache
+│   ├── GeoLite2-City.mmdb         # (Downloaded via script, ignored by git)
+│   └── GeoLite2-ASN.mmdb          # (Downloaded via script, ignored by git)
 ├── scripts/
-│   └── download_geoip.py              # Automated MaxMind GeoIP binary downloader
+│   └── download_geoip.py          # Standalone MaxMind GeoIP binary downloader
 ├── tests/
-│   ├── test_api.py                    # API endpoints & authentication test suite
-│   ├── test_hops.py                   # Hop parser & private IP filtering tests
-│   ├── test_parser.py                 # SHA-256 hash & spoofing heuristics tests
-│   ├── test_risk_scorer.py            # Scoring penalties & boundary capping tests
-│   └── test_threat_intel.py           # Tor exit & Datacenter ASN tests
-├── .dockerignore                      # Docker build exclusions
-├── .env.example                       # Environment configuration template
-├── .gitignore                         # Git hygiene rules
-├── Dockerfile                         # Production container definition
-├── docker-compose.yml                 # Multi-service stack (Backend + PostgreSQL)
-├── requirements.txt                   # Production Python dependencies
-└── run.sh                             # Portable bash runner for Linux / macOS / WSL
+│   ├── conftest.py                # Pytest fixtures & store reset
+│   ├── test_ai_failover.py        # Groq -> Ollama -> Template failover tests
+│   ├── test_api_endpoints.py      # REST API endpoints & FIFO store tests
+│   ├── test_dlp_shield.py         # PII scrubbing tests
+│   ├── test_parsers.py            # EML parsing & hop engine tests
+│   └── test_risk_scorer.py        # Threat scoring & verdict override tests
+├── .dockerignore                  # Docker build exclusions
+├── .env.example                   # Environment configuration template
+├── .gitignore                     # Git hygiene rules
+├── Dockerfile                     # Production container definition
+├── docker-compose.yml             # Single-service container stack
+├── requirements.txt               # Essential forensic Python dependencies
+└── run.sh                         # Lightweight runner script
 ```
 
 ---
@@ -178,8 +186,6 @@ vajra-backend/
 - **Git**
 
 ### 2. Environment Setup
-
-Clone the repository and create a clean virtual environment:
 
 ```bash
 # Clone the repository
@@ -194,118 +200,118 @@ source .venv/bin/activate
 
 # On Windows (PowerShell):
 .venv\Scripts\Activate.ps1
-# On Windows (CMD):
-.venv\Scripts\activate.bat
 ```
 
-### 3. Install Dependencies
+### 3. Install Dependencies & GeoIP Binaries
 
 ```bash
-pip install --upgrade pip
 pip install -r requirements.txt
+
+# Download GeoLite2 databases into data/
+python scripts/download_geoip.py
 ```
 
-### 4. Configure Environment Variables
+### 4. Configuration
 
-Copy the provided template:
+Copy `.env.example` to `.env` and configure optional AI keys:
 
 ```bash
 cp .env.example .env
 ```
 
-By default, `.env` is configured for **SQLite** with zero setup required:
-```env
-DATABASE_URL=sqlite:///./vajra.db
-SECRET_KEY=change-this-to-a-secure-random-secret-in-production-2026
+```ini
 ENVIRONMENT=development
+GROQ_API_KEY=your_groq_api_key_here  # Optional: enables 3.5s cloud AI reasoning
+OLLAMA_URL=http://localhost:11434/api/generate
+OLLAMA_MODEL=llama3.2:1b
 ```
 
-### 5. Download MaxMind GeoIP Databases
-
-Run the automated installer to download the compiled MaxMind GeoLite2 binary databases:
+### 5. Launch the Server
 
 ```bash
-python scripts/download_geoip.py
-```
-
-*(Note: If skipped, VAJRA gracefully falls back to mock GeoIP telemetry for local testing without crashing).*
-
-### 6. Launch the Application
-
-#### Option A: Direct Uvicorn Command
-```bash
+# Using uvicorn directly:
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
 
-#### Option B: Portable Shell Runner (Linux / macOS / WSL)
-```bash
-chmod +x run.sh
+# Or via run.sh:
 ./run.sh
 ```
 
-Navigate to:
-- **Interactive Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Alternative ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- **Diagnostics Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+Navigate to `http://localhost:8000/docs` to inspect and interact with the forensic APIs.
 
 ---
 
-## Running Automated Tests
+## Running Verification Tests
 
-VAJRA includes a comprehensive 22-test automated suite covering API endpoints, authentication, hop ordering, spoofing heuristics, and risk engine ceilings:
+The test suite covers the entire forensic pipeline with 100% pass rate:
 
 ```bash
 pytest -v
 ```
 
-Expected output:
 ```text
 ============================= test session starts =============================
-collected 22 items
+collected 30 items
 
-tests/test_api.py::test_health_endpoint PASSED                           [  4%]
-tests/test_api.py::test_auth_registration_and_login PASSED               [  9%]
-tests/test_api.py::test_validation_error_jsonable_encoder PASSED         [ 13%]
-tests/test_api.py::test_analyze_raw_endpoint_and_db_persistence PASSED   [ 18%]
-tests/test_api.py::test_analyze_file_upload_eml PASSED                   [ 22%]
-tests/test_api.py::test_case_report_html_endpoint PASSED                 [ 27%]
-tests/test_api.py::test_payload_too_large_ceiling PASSED                 [ 31%]
-tests/test_hops.py::test_rfc1918_and_loopback_filtering PASSED           [ 36%]
-tests/test_hops.py::test_bottom_up_traversal_order PASSED                [ 40%]
-tests/test_parser.py::test_sha256_cryptographic_evidence_chain PASSED    [ 45%]
-tests/test_parser.py::test_display_name_spoofing_embedded_email PASSED   [ 50%]
-tests/test_parser.py::test_display_name_spoofing_brand_mismatch PASSED   [ 54%]
-tests/test_parser.py::test_legitimate_display_name_clean PASSED          [ 59%]
-tests/test_risk_scorer.py::test_clean_safe_email PASSED                  [ 63%]
-tests/test_risk_scorer.py::test_spf_fail_penalty PASSED                  [ 68%]
-tests/test_risk_scorer.py::test_dkim_fail_penalty PASSED                 [ 72%]
-tests/test_risk_scorer.py::test_dmarc_fail_penalty PASSED                [ 77%]
-tests/test_risk_scorer.py::test_tor_exit_penalty PASSED                  [ 81%]
-tests/test_risk_scorer.py::test_datacenter_and_spoofing_suspicious PASSED [ 86%]
-tests/test_risk_scorer.py::test_maximum_ceiling_capped_at_100 PASSED     [ 90%]
-tests/test_threat_intel.py::test_tor_exit_node_detection PASSED          [ 95%]
-tests/test_threat_intel.py::test_datacenter_asn_detection PASSED         [100%]
+tests/test_ai_failover.py::test_ai_failover_tier1_groq_success PASSED    [  3%]
+tests/test_ai_failover.py::test_ai_failover_tier2_ollama_fallback PASSED [  6%]
+tests/test_ai_failover.py::test_ai_failover_tier3_static_template_fallback PASSED [ 10%]
+tests/test_ai_failover.py::test_ai_dlp_masking_integration PASSED        [ 13%]
+tests/test_api_endpoints.py::test_health_check PASSED                    [ 16%]
+tests/test_api_endpoints.py::test_analyze_raw_json PASSED                [ 20%]
+tests/test_api_endpoints.py::test_analyze_raw_text_plain PASSED          [ 23%]
+tests/test_api_endpoints.py::test_analyze_upload_eml PASSED              [ 26%]
+tests/test_api_endpoints.py::test_get_cases_and_pagination PASSED        [ 30%]
+tests/test_api_endpoints.py::test_get_case_pdf_stream PASSED             [ 33%]
+tests/test_api_endpoints.py::test_memory_store_fifo_bound PASSED         [ 36%]
+tests/test_dlp_shield.py::test_dlp_sanitize_credit_cards PASSED          [ 40%]
+tests/test_dlp_shield.py::test_dlp_sanitize_iban PASSED                  [ 43%]
+tests/test_dlp_shield.py::test_dlp_sanitize_phone_numbers PASSED         [ 46%]
+tests/test_dlp_shield.py::test_dlp_sanitize_titled_names PASSED          [ 50%]
+tests/test_dlp_shield.py::test_dlp_sanitize_labeled_names PASSED         [ 53%]
+tests/test_dlp_shield.py::test_dlp_no_pii_intact PASSED                  [ 56%]
+tests/test_parsers.py::test_parse_eml_bytes_basic PASSED                 [ 60%]
+tests/test_parsers.py::test_parse_eml_bytes_multipart_attachments PASSED [ 63%]
+tests/test_parsers.py::test_is_public_ip PASSED                          [ 66%]
+tests/test_parsers.py::test_parse_hops_and_origin_ordering PASSED        [ 70%]
+tests/test_parsers.py::test_audit_authentication_headers PASSED          [ 73%]
+tests/test_risk_scorer.py::test_clean_authentic_email_scores_zero PASSED [ 76%]
+tests/test_risk_scorer.py::test_authentication_penalties PASSED          [ 80%]
+tests/test_risk_scorer.py::test_quishing_qr_penalty PASSED               [ 83%]
+tests/test_risk_scorer.py::test_deceptive_link_penalty PASSED            [ 86%]
+tests/test_risk_scorer.py::test_free_webmail_lure_and_urgency PASSED     [ 90%]
+tests/test_risk_scorer.py::test_combined_critical_malicious_score PASSED [ 93%]
+tests/test_risk_scorer.py::test_hard_forensic_override_for_quishing PASSED [ 96%]
+tests/test_risk_scorer.py::test_score_bounded_to_100 PASSED              [100%]
 
-============================= 22 passed in 15.95s =============================
+======================= 30 passed, 2 warnings in 26.42s =======================
 ```
 
 ---
 
 ## Docker Deployment
 
-To spin up the entire production stack (FastAPI backend + PostgreSQL 15) with a single command:
-
 ```bash
-docker compose up --build
-```
+# Build and run with Docker Compose
+docker compose up -d --build
 
-The API service will be immediately accessible on port `8000`.
+# Verify container status
+docker compose ps
+
+# View live application logs
+docker compose logs -f backend
+```
 
 ---
 
-## Forensic Integrity & Compliance Notice
+## SIH 2026 Problem Statement 26106 Compliance
 
-VAJRA is designed in alignment with digital forensics best practices:
-1. **Non-Destructive Ingestion**: Input email payloads are never altered during parsing.
-2. **Cryptographic Validation**: Evidence records include SHA-256 digests and timestamped audit trails.
-3. **Deterministic Scoring**: Risk calculations are explainable, formula-driven, and repeatable for courtroom testimony.
+| Requirement | Implementation Architecture |
+| :--- | :--- |
+| **MTA Reverse Hop Traversal** | Bottom-up chronological parsing in `header_engine.py` with RFC 1918 filtering |
+| **Origin Pinpointing & GeoIP** | MaxMind `GeoLite2-City` & `GeoLite2-ASN` binary resolution |
+| **Threat Intelligence** | Curated Tor exit nodes matching and datacenter ASN detection |
+| **Cryptographic Authentication** | RFC 7208 SPF, RFC 6376 DKIM, and RFC 7489 DMARC audit matrix |
+| **Deep Artifact Extraction** | PyMuPDF in-memory PDF extraction and zxing-cpp quishing decoder |
+| **Deterministic Risk Scoring** | Bounded 0–100 score matrix with hard forensic overrides for quishing |
+| **Courtroom Evidence Export** | ReportLab Platypus PDF report generator with cryptographic hash integrity |
+| **Data Privacy & Air-Gap** | Zero persistent database, DLP PII masking, local Ollama LLM support |
