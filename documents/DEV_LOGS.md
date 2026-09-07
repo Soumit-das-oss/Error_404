@@ -45,3 +45,8 @@ This document serves as a chronological record of architectural decisions, UI/UX
 - **The Engine Spin-Up**: Implemented a forced 3.5-second `setTimeout` during scans.
 - **Terminal Animation (`ScanningLoader.jsx`)**: Built a loader that cycles through elite "hacker-style" forensic steps (e.g., "Parsing RFC-822 Headers...") every 800ms.
 - **Graceful Failure**: Wired the pipeline to attempt a `fetch()` to `localhost:8000`. Upon inevitable failure (since the backend is offline), the UI gracefully catches the error and mounts a sleek, Crimson-colored slide-in Toast banner alerting the user to the "Connection Refused" status.
+
+## [Phase 8] Advanced Motion Design & UI Polish
+**Objective:** Elevate the first impression and refine microcopy for enterprise-grade professionalism.
+- **Cyber-Defense Shield Animation**: Rewrote the `<HeroIntro />` component to use a synchronized 3-phase activation sequence (`coreIgnite`, `wingSweep`, `outlinePulse`) perfectly timed to `1.8s`, abandoning generic glide-in effects.
+- **Enterprise Microcopy**: Updated the secondary file attachment label in `UploadState.jsx` to "Upload Email Attachments (Optional)" for cleaner, more professional communication.

@@ -7,8 +7,10 @@ import ScanningLoader from './components/ScanningLoader';
 import TechnicalView from './components/TechnicalView';
 import SimpleView from './components/SimpleView';
 import AboutView from './components/AboutView';
+import HeroIntro from './components/HeroIntro';
 
 export default function App() {
+  const [introFinished, setIntroFinished] = useState(false);
   const [activeTab, setActiveTab] = useState('desktop'); 
   const [scanData, setScanData] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -43,7 +45,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050507] text-white font-sans selection:bg-amber-500/30 overflow-x-hidden relative">
+    <>
+      {!introFinished && <HeroIntro onComplete={() => setIntroFinished(true)} />}
+      <div className="min-h-screen bg-[#050507] text-white font-sans selection:bg-amber-500/30 overflow-x-hidden relative">
       <VajraBackground />
       
       {/* Error Toast Banner */}
@@ -92,5 +96,6 @@ export default function App() {
         </main>
       </div>
     </div>
+    </>
   );
 }
