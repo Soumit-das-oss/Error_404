@@ -13,8 +13,12 @@ PENALTY_DKIM_FAIL: int = 15
 PENALTY_DMARC_FAIL: int = 15
 PENALTY_DECEPTIVE_LINK: int = 25
 PENALTY_QUISHING_QR: int = 40
+PENALTY_QUISHING_MALICIOUS: int = 45
 PENALTY_URGENCY_INDICATORS: int = 20
 PENALTY_FREE_WEBMAIL_LURE: int = 35
+PENALTY_FREE_WEBMAIL_BRAND_IMPERSONATION: int = 40
+PENALTY_IN_BODY_HEADER_SPOOFING: int = 35
+PENALTY_TYPOSQUAT_BRAND: int = 45
 PENALTY_PDF_JAVASCRIPT: int = 35
 PENALTY_PDF_LAUNCH: int = 45
 
@@ -136,6 +140,26 @@ FINANCIAL_ACCOUNT_LURES: List[str] = [
     "payment verification",
     "account verification",
     "payment account verification",
+]
+
+COMMERCIAL_BRAND_LURES: List[str] = [
+    "flipkart",
+    "big billion days",
+    "amazon",
+    "exclusive voucher",
+    "kyc alert",
+    "gift card",
+    "reward points",
+    "order confirmed",
+    "voucher",
+    "cashback",
+    "lucky draw",
+    "lottery",
+    "claim prize",
+    "claim your prize",
+    "congratulations you won",
+    "unclaimed reward",
+    "special offer",
 ]
 
 DANGEROUS_PAYLOAD_EXTENSIONS: List[str] = [

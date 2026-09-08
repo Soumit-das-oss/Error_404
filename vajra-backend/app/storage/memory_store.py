@@ -41,9 +41,10 @@ class MemoryCaseStore:
 
     def get_case(self, case_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a specific forensic case by its unique case_id."""
+        clean_id = case_id.strip("\"' ") if case_id else case_id
         with self._lock:
             for case in self._cases:
-                if case.get("case_id") == case_id:
+                if case.get("case_id") == clean_id:
                     # Return a copy to prevent mutation outside the lock
                     return dict(case)
             return None

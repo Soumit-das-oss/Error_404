@@ -44,10 +44,11 @@ async def list_cases(
     description="Retrieve detailed forensic intelligence dossier for a specific case by its ID.",
 )
 async def get_case_by_id(case_id: str) -> CaseResponseDTO:
-    case_data = get_case(case_id)
+    clean_id = case_id.strip("\"' ")
+    case_data = get_case(clean_id)
     if not case_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Forensic case '{case_id}' not found in active memory store.",
+            detail=f"Forensic case '{clean_id}' not found in active memory store.",
         )
     return CaseResponseDTO.model_validate(case_data)

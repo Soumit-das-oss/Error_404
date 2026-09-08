@@ -9,17 +9,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "VAJRA Forensics - AI-Powered Threat Intelligence Platform"
+    PROJECT_NAME: str = "VAJRA Forensics - AI-Powered Threat Intelligence Platform (SIH26106)"
+    PROBLEM_STATEMENT: str = "SIH26106"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
 
     # AI Integration Settings
     GROQ_API_KEY: Optional[str] = None
-    LLM_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_URL: str = "http://localhost:11434/api/generate"
     OLLAMA_MODEL: str = "llama3.2:1b"
-    GROQ_TIMEOUT_SECONDS: float = 3.5
-    OLLAMA_TIMEOUT_SECONDS: float = 5.0
+    GROQ_TIMEOUT_SECONDS: float = 4.0
+    OLLAMA_TIMEOUT_SECONDS: float = 15.0
 
     # 25 MB Payload Limit (25 * 1024 * 1024 bytes)
     MAX_PAYLOAD_BYTES: int = 26214400
@@ -34,23 +37,38 @@ class Settings(BaseSettings):
     # Defensive DNS Resolution
     DNS_TIMEOUT_SECONDS: float = 3.0
 
-    # CORS Configuration
-    CORS_ORIGINS: List[str] = ["*"]
+    # Explicit CORS Whitelist for Local React Frontends
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        default_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
         if isinstance(v, str):
             if v.startswith("[") and v.endswith("]"):
                 try:
                     import json
-                    return json.loads(v)
+                    parsed = json.loads(v)
+                    filtered = [i for i in parsed if i != "*"]
+                    return filtered or default_origins
                 except Exception:
                     pass
-            return [i.strip() for i in v.split(",") if i.strip()]
+            origins = [i.strip() for i in v.split(",") if i.strip() and i.strip() != "*"]
+            return origins or default_origins
         elif isinstance(v, list):
-            return v
-        return ["*"]
+            filtered = [i for i in v if i != "*"]
+            return filtered or default_origins
+        return default_origins
 
     model_config = SettingsConfigDict(
         env_file=".env",

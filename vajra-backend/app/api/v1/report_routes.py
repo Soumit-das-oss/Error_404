@@ -26,11 +26,12 @@ router = APIRouter()
     },
 )
 async def download_case_pdf(case_id: str):
-    case_data = get_case(case_id)
+    clean_id = case_id.strip("\"' ")
+    case_data = get_case(clean_id)
     if not case_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Forensic case '{case_id}' not found in active memory store.",
+            detail=f"Forensic case '{clean_id}' not found in active memory store.",
         )
 
     try:

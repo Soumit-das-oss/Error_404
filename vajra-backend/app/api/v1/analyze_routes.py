@@ -21,6 +21,8 @@ from app.analyzers.url_analyzer import analyze_urls
 from app.analyzers.qr_engine import extract_qr_codes, scan_qr_bytes, extract_qr_telemetry
 from app.analyzers.pdf_engine import extract_pdf_telemetry
 from app.services.risk_scorer import calculate_risk_score
+from app.services.auth_engine import perform_independent_verification
+from app.services.detectors.brand_registry import check_brand_typosquatting
 from app.services.ai.explainer_orchestrator import generate_threat_explanation
 from app.storage.memory_store import save_case
 from app.schemas.analysis import CaseResponseDTO, RawEmailRequest, DlpOption
@@ -40,6 +42,14 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         auth_results=parsed.get("recorded_auth_results", []),
         received_spf=parsed.get("recorded_received_spf", []),
         dkim_signatures=parsed.get("recorded_dkim_signatures", []),
+        raw_bytes=parsed.get("raw_bytes"),
+    )
+
+    # 2b. Independent live DNS & cryptographic authentication verification (with air-gap fallback)
+    independent_auth = perform_independent_verification(
+        sender_domain=parsed.get("sender_domain"),
+        candidate_origin_ip=earliest_public_ip,
+        recorded_auth=auth_result,
         raw_bytes=parsed.get("raw_bytes"),
     )
 
@@ -96,7 +106,15 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
     qr_telem = extract_qr_telemetry(images_for_qr)
     qr_urls = qr_telem["qr_urls"]
     is_suspicious_qr = qr_telem["is_suspicious_qr"]
-    benign_qr_urls = qr_telem["benign_qr_urls"]
+    benign_qr_urls = list(qr_telem["benign_qr_urls"])
+
+    # Check if any QR URL points to a brand typosquatting domain
+    for q_url in qr_urls:
+        if check_brand_typosquatting(q_url):
+            is_suspicious_qr = True
+            if q_url in benign_qr_urls:
+                benign_qr_urls.remove(q_url)
+
     quishing_detected = (len(qr_urls) > 0 and is_suspicious_qr)
 
     # 5. URL and deceptive hyperlink analysis
@@ -140,7 +158,13 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         has_pdf_launch=has_pdf_launch,
         pdf_deceptive_links=pdf_deceptive_links,
         is_authentic_pdf=has_pdf_attachment and not has_pdf_javascript and not has_pdf_launch and not pdf_deceptive_links,
+        is_free_webmail_brand_impersonation=text_result.get("is_free_webmail_brand_impersonation", False),
+        commercial_matches=text_result.get("commercial_matches", []),
+        has_in_body_header_spoofing=text_result.get("has_in_body_header_spoofing", False),
+        in_body_spoof_detail=text_result.get("in_body_spoof_detail"),
+        typosquat_urls=url_result.get("typosquat_urls", []),
     )
+    quishing_detected = risk_result.get("quishing_detected", quishing_detected)
 
     # 8. AI Explainer with DLP and automatic 2-tier failover
     telemetry_for_ai = {
@@ -151,6 +175,8 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         "score": risk_result["score"],
         "verdict": risk_result["verdict"],
         "penalties": risk_result["penalties"],
+        "auth": auth_result,
+        "hops": hops,
     }
     raw_text_for_ai = parsed.get("body_plain") or parsed.get("body_html") or parsed.get("subject") or ""
 
@@ -164,6 +190,9 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
     short_id = uuid.uuid4().hex[:6].upper()
     case_id = f"CAS-{date_str}-{short_id}"
     created_at = datetime.now(timezone.utc)
+
+    engine_used = ai_result.get("engine_used", "")
+    ai_provider = ai_result.get("ai_provider") or ("heuristic" if engine_used == "fallback_template" else (engine_used or "heuristic"))
 
     case_data = {
         "case_id": case_id,
@@ -184,7 +213,7 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
             "received_spf": parsed.get("recorded_received_spf", []),
             "dkim_signatures": parsed.get("recorded_dkim_signatures", []),
         },
-        "independent_verification": auth_result,
+        "independent_verification": independent_auth,
         "artifacts": {
             "plain_text_snippet": (parsed.get("body_plain", "")[:300] if parsed.get("body_plain") else None),
             "html_links_count": len(url_result.get("extracted_urls", [])),
@@ -208,6 +237,7 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         "verdict": risk_result["verdict"],
         "quishing_detected": quishing_detected,
         "llm_summary": ai_result["summary"],
+        "ai_provider": ai_provider,
         "dlp_security": ai_result.get("dlp_security", {
             "status": "ACTIVE" if dlp_masking else "BYPASSED",
             "masking_active": dlp_masking,
@@ -289,21 +319,18 @@ async def analyze_email_upload(
 @router.post(
     "/raw",
     response_model=CaseResponseDTO,
-    summary="Analyze raw RFC 5322 email string, multipart form with attachments, or text stream",
-    description="Analyze raw RFC 5322 email text submitted via JSON payload, multipart form with file attachments, or direct plain text stream.",
+    summary="Analyze raw RFC 5322 email with attachments (canonical multipart/form-data)",
+    description="Analyze RFC 5322 email text submitted via canonical multipart/form-data with optional file attachments (PDF/QR), JSON payload, or raw text stream.",
     openapi_extra={
         "requestBody": {
             "content": {
-                "application/json": {
-                    "schema": RawEmailRequest.model_json_schema()
-                },
                 "multipart/form-data": {
                     "schema": {
                         "type": "object",
                         "properties": {
                             "raw_email": {
                                 "type": "string",
-                                "description": "Full RFC 5322 email text (headers + body)",
+                                "description": "Full RFC 5322 email text stream (headers + body)",
                                 "example": "From: security@paypal-alerts.com\nTo: victim@example.com\nSubject: Account Suspended\n\nDear user, verify your account within 24 hours."
                             },
                             "attachments": {
@@ -312,11 +339,14 @@ async def analyze_email_upload(
                                     "type": "string",
                                     "format": "binary"
                                 },
-                                "description": "Mobile file attachments (PDF documents or QR code images)"
+                                "description": "Optional file attachments (PDF documents or QR code images)"
                             }
                         },
                         "required": ["raw_email"]
                     }
+                },
+                "application/json": {
+                    "schema": RawEmailRequest.model_json_schema()
                 },
                 "text/plain": {
                     "schema": {
@@ -326,7 +356,7 @@ async def analyze_email_upload(
                 }
             },
             "required": True,
-            "description": "Full RFC 5322 email text submitted as JSON, multipart form with attachments, or raw plain text stream."
+            "description": "Full RFC 5322 email text submitted via canonical multipart/form-data, JSON payload, or raw plain text stream."
         }
     }
 )
@@ -337,11 +367,13 @@ async def analyze_email_upload(
 )
 async def analyze_raw_email(
     request: Request,
+    raw_email: Optional[str] = Form(None, description="Full RFC 5322 email text stream (headers + body)"),
+    attachments: Optional[List[UploadFile]] = File(default=[], description="Optional file attachments (PDF documents or QR code images)"),
     dlp_masking: DlpOption = Query(..., description="Enable local in-memory PII masking"),
 ) -> CaseResponseDTO:
     content_type = request.headers.get("content-type", "").lower()
 
-    is_dlp_active = (dlp_masking == DlpOption.TRUE or str(dlp_masking).lower() == "true")
+    is_dlp_active = (dlp_masking == DlpOption.TRUE or str(dlp_masking).lower() in ("true", "1"))
     query_dlp = request.query_params.get("dlp_masking")
     if query_dlp is not None:
         is_dlp_active = query_dlp.lower() not in ("false", "0", "no")
@@ -352,7 +384,7 @@ async def analyze_raw_email(
     # 1. Handle Form Data (Multipart Mobile Flow or urlencoded browser form)
     if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
         form = await request.form()
-        raw_email_val = form.get("raw_email") or form.get("email") or ""
+        raw_email_val = raw_email or form.get("raw_email") or form.get("email") or ""
         if hasattr(raw_email_val, "read"):
             raw_bytes = await raw_email_val.read()
         else:
@@ -363,30 +395,40 @@ async def analyze_raw_email(
             is_dlp_active = str(form["dlp_masking"]).lower() not in ("false", "0", "no")
 
         # Ingest mobile attachments in-memory dynamically (zero disk writes)
+        processed_file_hashes = set()
+        all_upload_files = list(attachments or [])
         form_entries = form.multi_items() if hasattr(form, "multi_items") else form.items()
         for key, item in form_entries:
             if key in ("raw_email", "email", "dlp_masking"):
                 continue
             if hasattr(item, "read") and hasattr(item, "filename"):
-                f_bytes = await item.read()
-                if not f_bytes:
-                    continue
-                if len(f_bytes) > settings.MAX_PAYLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"Attachment exceeds maximum allowed size of {settings.MAX_PAYLOAD_BYTES // (1024 * 1024)} MB.",
-                    )
-                fname = getattr(item, "filename", "") or "mobile_attachment"
-                f_ctype = (getattr(item, "content_type", "") or "application/octet-stream").lower()
-                extra_attachments.append({
-                    "filename": fname,
-                    "content_type": f_ctype,
-                    "size_bytes": len(f_bytes),
-                    "payload_bytes": f_bytes,
-                    "sha256": hashlib.sha256(f_bytes).hexdigest(),
-                })
+                all_upload_files.append(item)
+
+        for item in all_upload_files:
+            f_bytes = await item.read()
+            if not f_bytes:
+                continue
+            f_sha256 = hashlib.sha256(f_bytes).hexdigest()
+            if f_sha256 in processed_file_hashes:
+                continue
+            processed_file_hashes.add(f_sha256)
+
+            if len(f_bytes) > settings.MAX_PAYLOAD_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"Attachment exceeds maximum allowed size of {settings.MAX_PAYLOAD_BYTES // (1024 * 1024)} MB.",
+                )
+            fname = getattr(item, "filename", "") or "mobile_attachment"
+            f_ctype = (getattr(item, "content_type", "") or "application/octet-stream").lower()
+            extra_attachments.append({
+                "filename": fname,
+                "content_type": f_ctype,
+                "size_bytes": len(f_bytes),
+                "payload_bytes": f_bytes,
+                "sha256": f_sha256,
+            })
     else:
-        # 2. Handle JSON and Plain Text streams
+        # 2. Handle JSON and Plain Text streams (Graceful Fallback)
         body_bytes = await request.body()
         if len(body_bytes) > settings.MAX_PAYLOAD_BYTES:
             raise HTTPException(

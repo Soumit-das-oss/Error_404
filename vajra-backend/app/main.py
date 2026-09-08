@@ -1,6 +1,6 @@
 """
-VAJRA Forensic Platform - High-Performance Air-Gapped API Entry Point
-SIH Problem Statement 26106 | Zero Disk Database | Pure In-Memory Forensic Intelligence
+VAJRA Forensic Platform - High-Performance Offline-First API Entry Point
+SIH Problem Statement SIH26106 | Zero Disk Database | Pure In-Memory Forensic Intelligence
 """
 
 import logging
@@ -29,7 +29,7 @@ logger = logging.getLogger("vajra.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for air-gapped forensic engine."""
+    """Application lifespan manager for offline-first / air-gapped forensic engine."""
     logger.info("=" * 65)
     logger.info("Initializing VAJRA Forensic Email Intelligence Engine...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
@@ -49,8 +49,8 @@ def create_app() -> FastAPI:
         title=settings.PROJECT_NAME,
         version="2.0.0",
         description=(
-            "Air-gapped, zero-database REST API for AI-Powered Email Threat Detection, "
-            "GeoLocation, and Forensic Intelligence Platform (SIH 2026 - Problem Statement SIH26106)."
+            "Offline-first / air-gapped-capable, zero-database REST API for AI-Powered Email Threat Detection, "
+            "sending infrastructure geolocation, and Forensic Intelligence Platform (SIH 2026 - Problem Statement SIH26106)."
         ),
         docs_url="/docs",
         redoc_url="/redoc",
@@ -58,19 +58,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS Middleware configuration for web dashboards and SOC frontends
+    # CORS Middleware configuration explicitly whitelisted for local React development
     cors_origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
     if settings.CORS_ORIGINS:
-        if "*" in settings.CORS_ORIGINS:
-            cors_origins = ["*"]
-        else:
-            for origin in settings.CORS_ORIGINS:
-                if origin not in cors_origins:
-                    cors_origins.append(origin)
+        for origin in settings.CORS_ORIGINS:
+            if origin != "*" and origin not in cors_origins:
+                cors_origins.append(origin)
 
     app.add_middleware(
         CORSMiddleware,

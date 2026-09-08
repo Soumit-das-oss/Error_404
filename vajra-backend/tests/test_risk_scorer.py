@@ -192,3 +192,64 @@ def test_clean_pdf_scores_zero():
     assert result["score"] == 0
     assert result["verdict"] == "SAFE"
     assert any(p["rule"] == "Authentic PDF Document Inspected" for p in result["penalties"])
+
+
+def test_typosquat_brand_impersonation_penalty():
+    auth = {"spf": {"status": "PASS"}, "dkim": {"status": "PASS"}, "dmarc": {"status": "PASS"}}
+    deceptive = [{
+        "anchor_text": "flipkart.com",
+        "actual_href": "https://www.filipkart.com/big-billion",
+        "display_domain": "flipkart.com",
+        "target_domain": "filipkart.com",
+        "indicator": "TYPOSQUAT_BRAND_IMPERSONATION",
+    }]
+    result = calculate_risk_score(
+        auth_matrix=auth,
+        deceptive_links=deceptive,
+    )
+    assert result["score"] >= 75
+    assert result["verdict"] == "MALICIOUS"
+    rules = [p["rule"] for p in result["penalties"]]
+    assert "TYPOSQUAT_BRAND_IMPERSONATION" in rules
+
+
+def test_free_webmail_commercial_lure_forces_malicious():
+    auth = {"spf": {"status": "PASS"}, "dkim": {"status": "PASS"}, "dmarc": {"status": "PASS"}}
+    result = calculate_risk_score(
+        auth_matrix=auth,
+        sender_domain="gmail.com",
+        is_free_webmail_brand_impersonation=True,
+        commercial_matches=["flipkart", "big billion days"],
+    )
+    assert result["score"] >= 75
+    assert result["verdict"] == "MALICIOUS"
+    rules = [p["rule"] for p in result["penalties"]]
+    assert "FREE_WEBMAIL_BRAND_IMPERSONATION" in rules
+
+
+def test_in_body_header_spoofing_penalty():
+    auth = {"spf": {"status": "PASS"}, "dkim": {"status": "PASS"}, "dmarc": {"status": "PASS"}}
+    result = calculate_risk_score(
+        auth_matrix=auth,
+        sender_domain="gmail.com",
+        has_in_body_header_spoofing=True,
+        in_body_spoof_detail="In-body header forgery detected: fake header '*From:* Flipkart Support' contradicts envelope.",
+    )
+    assert result["score"] >= 75
+    assert result["verdict"] == "MALICIOUS"
+    rules = [p["rule"] for p in result["penalties"]]
+    assert "IN_BODY_HEADER_SPOOFING" in rules
+
+
+def test_cross_channel_quishing_linkage_to_typosquat():
+    auth = {"spf": {"status": "PASS"}, "dkim": {"status": "PASS"}, "dmarc": {"status": "PASS"}}
+    result = calculate_risk_score(
+        auth_matrix=auth,
+        qr_urls=["https://www.filipkart.com/claim-reward"],
+        is_suspicious_qr=False,  # Initially marked clean, but linked to typosquat
+    )
+    assert result["score"] >= 75
+    assert result["verdict"] == "MALICIOUS"
+    rules = [p["rule"] for p in result["penalties"]]
+    assert "QUISHING_MALICIOUS_PAYLOAD" in rules
+    assert not any(p["rule"] == "Benign QR Code Verified" for p in result["penalties"])

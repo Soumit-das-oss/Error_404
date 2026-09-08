@@ -3,14 +3,16 @@ VAJRA Forensic Platform - Text & Social Engineering Analyzer
 Detects artificial urgency indicators and Free Webmail authority impersonation lures.
 """
 
-import re
 from typing import Dict, Any, List, Optional
+import re
 from app.core.constants import (
     URGENCY_PATTERNS,
     FINANCIAL_ACCOUNT_LURES,
+    COMMERCIAL_BRAND_LURES,
     FREE_WEBMAIL_DOMAINS,
     IMPERSONATION_TARGET_KEYWORDS,
 )
+from app.services.detectors.brand_registry import BRAND_TOKENS, PROTECTED_BRANDS
 
 
 def analyze_text_patterns(
@@ -20,8 +22,11 @@ def analyze_text_patterns(
     sender_domain: Optional[str] = None,
     sender_address: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Inspect email text and sender attributes for urgency and free webmail impersonation lures."""
+    """Inspect email text and sender attributes for urgency, commercial lures, and header forgery."""
     combined_text = f"{subject or ''}\n{body_plain or ''}".lower()
+    eff_domain = (sender_domain or "").lower().strip()
+    disp_name = (sender_display_name or "").lower()
+    disp_raw = sender_display_name or ""
 
     # 1. Detect Urgency Keywords
     matched_urgency: List[str] = []
@@ -39,24 +44,68 @@ def analyze_text_patterns(
 
     has_financial_lure = len(matched_financial) > 0
 
-    # 3. Detect Free Webmail Impersonation & BEC Lures
-    # Occurs when:
-    #   a) The actual sending domain is a free public webmail service (e.g. gmail.com, yahoo.com)
-    #   AND
-    #   b) The email contains urgency keywords OR financial/account lures
-    #      (Free webmail accounts are NEVER legitimate corporate newsletters)
-    #   OR
-    #   c) The display name mimics an authoritative executive, department, or high-profile brand
-    #   OR display name embeds an official corporate domain/email
+    # 3. Detect Commercial Brand Lures
+    matched_commercial: List[str] = []
+    for pattern in COMMERCIAL_BRAND_LURES:
+        if pattern in combined_text:
+            matched_commercial.append(pattern)
+
+    is_free_webmail_brand_impersonation = False
+    brand_impersonation_reason = None
+
+    if eff_domain in FREE_WEBMAIL_DOMAINS and matched_commercial:
+        is_free_webmail_brand_impersonation = True
+        comm_str = ", ".join(matched_commercial[:3])
+        brand_impersonation_reason = (
+            f"Free webmail provider '{eff_domain}' used to distribute commercial enterprise lures: '{comm_str}'."
+        )
+
+    # 4. Detect In-Body Header Forgery (contradicting envelope sender)
+    has_in_body_header_spoofing = False
+    in_body_spoof_detail = None
+
+    if body_plain:
+        for line in body_plain.splitlines():
+            line_clean = line.strip()
+            m = re.match(r"^(?:\*|_)?(?:from|sender)\s*(?:\*|_)?\s*:\s*(?:\*|_)?(.+)$", line_clean, re.IGNORECASE)
+            if m:
+                header_val = m.group(1).strip().strip("*_")
+                embedded_email = re.search(r"[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", header_val)
+                if embedded_email:
+                    claimed_email = embedded_email.group(0).lower()
+                    claimed_domain = embedded_email.group(1).lower()
+                    if sender_address and claimed_email != sender_address.lower():
+                        has_in_body_header_spoofing = True
+                        in_body_spoof_detail = (
+                            f"In-body header forgery detected: fake header '{line_clean[:80]}' "
+                            f"claims sender '{claimed_email}' contradicting envelope sender '{sender_address}'."
+                        )
+                        break
+                    elif eff_domain and claimed_domain != eff_domain:
+                        has_in_body_header_spoofing = True
+                        in_body_spoof_detail = (
+                            f"In-body header forgery detected: fake header '{line_clean[:80]}' "
+                            f"claims domain '{claimed_domain}' contradicting envelope domain '{eff_domain}'."
+                        )
+                        break
+                else:
+                    header_lower = header_val.lower()
+                    for token in BRAND_TOKENS:
+                        if token in header_lower and eff_domain in FREE_WEBMAIL_DOMAINS:
+                            has_in_body_header_spoofing = True
+                            in_body_spoof_detail = (
+                                f"In-body header forgery detected: fake header '{line_clean[:80]}' "
+                                f"impersonates brand '{token}' while sent from free webmail '{eff_domain}'."
+                            )
+                            break
+                    if has_in_body_header_spoofing:
+                        break
+
+    # 5. Detect Free Webmail Impersonation & BEC Lures
     is_free_webmail_lure = False
     lure_reason = None
 
-    eff_domain = (sender_domain or "").lower().strip()
-    disp_name = (sender_display_name or "").lower()
-    disp_raw = sender_display_name or ""
-
     if eff_domain in FREE_WEBMAIL_DOMAINS:
-        # Check if display name mimics executive / authority keywords
         for kw in IMPERSONATION_TARGET_KEYWORDS:
             if re.search(r"\b" + re.escape(kw) + r"\b", disp_name):
                 is_free_webmail_lure = True
@@ -66,7 +115,6 @@ def analyze_text_patterns(
                 )
                 break
 
-        # Check if display name embeds another domain/email (e.g. "support@company.com" <fraud@gmail.com>)
         if not is_free_webmail_lure:
             embedded_email_match = re.search(r"[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", disp_raw)
             if embedded_email_match:
@@ -78,7 +126,6 @@ def analyze_text_patterns(
                         f"while transmitting via free webmail '{eff_domain}'."
                     )
 
-        # Check if urgency or financial/account lure originates from free webmail
         if not is_free_webmail_lure and (has_urgency or has_financial_lure):
             is_free_webmail_lure = True
             triggers = list(dict.fromkeys(matched_financial + matched_urgency))
@@ -94,4 +141,9 @@ def analyze_text_patterns(
         "financial_lure_matches": matched_financial,
         "is_free_webmail_lure": is_free_webmail_lure,
         "lure_reason": lure_reason,
+        "is_free_webmail_brand_impersonation": is_free_webmail_brand_impersonation,
+        "commercial_matches": matched_commercial,
+        "brand_impersonation_reason": brand_impersonation_reason,
+        "has_in_body_header_spoofing": has_in_body_header_spoofing,
+        "in_body_spoof_detail": in_body_spoof_detail,
     }

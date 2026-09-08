@@ -42,6 +42,8 @@ async def test_analyze_raw_json(async_client):
     assert "risk" in data
     assert "verdict" in data
     assert "llm_summary" in data
+    assert "ai_provider" in data
+    assert data["ai_provider"] in ("groq", "ollama", "heuristic")
     assert case_store.count == 1
 
 
@@ -284,6 +286,13 @@ async def test_openapi_dlp_masking_schema_is_required_enum(async_client):
         assert enum_schema["enum"] == ["true", "false"]
     else:
         assert dlp_param["schema"]["enum"] == ["true", "false"]
+
+    # Verify multipart/form-data is the primary content type for /api/v1/raw
+    raw_content = openapi["paths"]["/api/v1/raw"]["post"]["requestBody"]["content"]
+    assert list(raw_content.keys())[0] == "multipart/form-data"
+    multipart_schema = raw_content["multipart/form-data"]["schema"]
+    assert "raw_email" in multipart_schema["properties"]
+    assert "attachments" in multipart_schema["properties"]
 
 
 @pytest.mark.asyncio
@@ -587,4 +596,192 @@ async def test_collapsed_single_line_headers_extraction(async_client):
     assert res_form_data["subject"] == "Urgent: Verify Corporate Billing Account"
     assert "pratikshadabhekar44@gmail.com" in res_form_data["sender"]
     assert res_form_data["sender_domain"] == "gmail.com"
+
+
+@pytest.mark.asyncio
+async def test_cors_origins_whitelisting(async_client):
+    # Test whitelisted React frontend origin (Vite)
+    res_vite = await async_client.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert res_vite.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert res_vite.headers.get("access-control-allow-credentials") == "true"
+
+    # Test CRA / Next.js default origin
+    res_cra = await async_client.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert res_cra.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+    # Test unwhitelisted origin is NOT granted access
+    res_disallowed = await async_client.options(
+        "/health",
+        headers={
+            "Origin": "http://malicious-external-origin.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert res_disallowed.headers.get("access-control-allow-origin") is None
+
+
+@pytest.mark.asyncio
+async def test_case_id_quote_sanitization(async_client):
+    raw_email = (
+        "From: test@example.com\r\n"
+        "To: user@example.com\r\n"
+        "Subject: Test Case Sanitization\r\n"
+        "\r\n"
+        "Testing quote stripping on case ID endpoints."
+    )
+    res_post = await async_client.post("/api/v1/raw", data={"raw_email": raw_email})
+    assert res_post.status_code == 200
+    case_id = res_post.json()["case_id"]
+
+    # 1. Test case retrieval with surrounding double quotes: "CAS-..."
+    res_quoted_double = await async_client.get(f'/api/v1/cases/"{case_id}"')
+    assert res_quoted_double.status_code == 200
+    assert res_quoted_double.json()["case_id"] == case_id
+
+    # 2. Test case retrieval with surrounding single quotes: 'CAS-...'
+    res_quoted_single = await async_client.get(f"/api/v1/cases/'{case_id}'")
+    assert res_quoted_single.status_code == 200
+    assert res_quoted_single.json()["case_id"] == case_id
+
+    # 3. Test PDF download route with quoted case_id
+    res_pdf_quoted = await async_client.get(f'/api/v1/cases/"{case_id}"/pdf')
+    assert res_pdf_quoted.status_code == 200
+    assert res_pdf_quoted.headers["content-type"] == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_brand_typosquatting_filipkart_detection(async_client):
+    raw_email = (
+        "From: order-update@notifications-hub.com\r\n"
+        "To: victim@example.com\r\n"
+        "Subject: Claim your Big Billion Day Gift\r\n"
+        "Authentication-Results: mx.example.com; dkim=pass; spf=pass; dmarc=pass\r\n"
+        "Content-Type: text/html\r\n"
+        "\r\n"
+        "<html><body>Click here to claim: <a href='https://www.filipkart.com/claim-now'>Claim Deal</a></body></html>"
+    )
+    res = await async_client.post("/api/v1/raw", data={"raw_email": raw_email})
+    assert res.status_code == 200
+    data = res.json()
+
+    # Brand typosquatting must force MALICIOUS verdict with score >= 75
+    assert data["risk"]["score"] >= 75
+    assert data["verdict"] == "MALICIOUS"
+
+    rules = [p["rule"] for p in data["risk"]["itemized_penalties"]]
+    assert "TYPOSQUAT_BRAND_IMPERSONATION" in rules
+
+    # Assert deceptive_urls records the typosquatting domain
+    deceptive_targets = [d["target_domain"] for d in data["artifacts"]["deceptive_urls"]]
+    assert "filipkart.com" in deceptive_targets
+
+
+@pytest.mark.asyncio
+async def test_free_webmail_commercial_lure_flipkart(async_client):
+    raw_email = (
+        "From: Flipkart Deals <dealsflipkart99@gmail.com>\r\n"
+        "To: shopper@example.com\r\n"
+        "Subject: Flipkart Big Billion Days - Exclusive Voucher Claim\r\n"
+        "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "Dear customer, you have won an exclusive voucher worth 5000 Rs for Flipkart Big Billion Days."
+    )
+    res = await async_client.post("/api/v1/raw", data={"raw_email": raw_email})
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["risk"]["score"] >= 75
+    assert data["verdict"] == "MALICIOUS"
+
+    rules = [p["rule"] for p in data["risk"]["itemized_penalties"]]
+    assert "FREE_WEBMAIL_BRAND_IMPERSONATION" in rules
+
+
+@pytest.mark.asyncio
+async def test_independent_verification_source_and_fallback(async_client):
+    raw_email = (
+        "From: notifications@google.com\r\n"
+        "To: user@example.com\r\n"
+        "Subject: Security Account Notice\r\n"
+        "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "Official security notice from Google."
+    )
+    res = await async_client.post("/api/v1/raw", data={"raw_email": raw_email})
+    assert res.status_code == 200
+    data = res.json()
+
+    indep = data.get("independent_verification", {})
+    assert "spf" in indep
+    assert "dkim" in indep
+    assert "dmarc" in indep
+    assert indep["spf"]["source"] in ("live_dns", "recorded_mta")
+    assert indep["dmarc"]["source"] in ("live_dns", "recorded_mta")
+
+
+@pytest.mark.asyncio
+async def test_pdf_report_itemized_threat_deductions_rendering(async_client):
+    import fitz
+    from app.services.report_generator import generate_case_pdf
+
+    # 1. Ingest a malicious typosquatted email to generate positive threat penalties
+    raw_email = (
+        "From: Flipkart Support <support@filipkart.com>\r\n"
+        "To: victim@example.com\r\n"
+        "Subject: Urgent Account Suspension Notice\r\n"
+        "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "Please verify your credentials at http://filipkart.com/login immediately."
+    )
+    res = await async_client.post("/api/v1/raw", data={"raw_email": raw_email})
+    assert res.status_code == 200
+    data = res.json()
+    case_id = data["case_id"]
+    assert data["risk"]["score"] >= 75
+    assert data["verdict"] == "MALICIOUS"
+
+    # 2. Fetch PDF dossier via GET /api/v1/cases/{case_id}/pdf
+    pdf_res = await async_client.get(f"/api/v1/cases/{case_id}/pdf")
+    assert pdf_res.status_code == 200
+    pdf_bytes = pdf_res.content
+    assert pdf_bytes.startswith(b"%PDF")
+
+    # 3. Inspect PDF text: must contain rule code and points, must NOT say Clean Audit
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    all_text = "".join(page.get_text() for page in doc)
+    assert "TYPOSQUAT_BRAND_IMPERSONATION" in all_text
+    assert "+45" in all_text
+    assert "Clean Audit: Zero threat penalties triggered." not in all_text
+
+    # 4. Direct check on clean case (score=0, no positive penalties): must display Clean Audit
+    clean_case = {
+        "case_id": "CAS-CLEAN-001",
+        "sha256": "0" * 64,
+        "subject": "Clean Email",
+        "sender": "clean@example.com",
+        "score": 0,
+        "verdict": "SAFE",
+        "risk": {"score": 0, "verdict": "SAFE", "itemized_penalties": []},
+    }
+    clean_pdf = generate_case_pdf(clean_case)
+    clean_doc = fitz.open(stream=clean_pdf, filetype="pdf")
+    clean_text = "".join(page.get_text() for page in clean_doc)
+    assert "Clean Audit: Zero threat penalties triggered." in clean_text
+
+
 

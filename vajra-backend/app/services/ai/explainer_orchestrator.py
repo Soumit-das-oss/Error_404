@@ -1,13 +1,23 @@
 """
 VAJRA Forensic Platform - AI Explainer Orchestrator & Auto-Failover Controller
-Coordinates DLP sanitization and manages automatic failover from Groq -> Ollama -> Static Template.
+SIH Problem Statement: SIH26106
+
+Coordinates DLP sanitization and manages automatic 3-tier failover:
+  Tier 1: Cloud LLM (Groq API, 4.0s timeout)
+  Tier 2: Local Offline LLM (Ollama instance, 5.0s timeout)
+  Tier 3: Deterministic Forensic Static Heuristic Briefing (Offline Guarantee)
 """
 
 import logging
 from typing import Dict, Any
+from app.core.config import settings
 from app.services.dlp_shield import sanitize_text
 from app.services.ai.groq_provider import generate_groq_briefing
-from app.services.ai.ollama_provider import generate_ollama_briefing
+from app.services.ai.ollama_provider import (
+    generate_ollama_briefing,
+    REFUSAL_TRIGGERS,
+    VAJRA_SOC_SYSTEM_PROMPT,
+)
 from app.core.constants import get_static_briefing_template
 
 logger = logging.getLogger("vajra.ai.orchestrator")
@@ -18,10 +28,10 @@ async def generate_threat_explanation(
     raw_text: str,
     dlp_masking: bool = True,
 ) -> Dict[str, Any]:
-    """Orchestrate 3-sentence executive threat briefing generation with DLP and 2-tier failover.
+    """Orchestrate 2-sentence executive threat briefing generation with DLP and 3-tier failover.
 
     Returns:
-      {"summary": str, "engine_used": "groq" | "ollama" | "fallback_template", "dlp_active": bool}
+      {"summary": str, "engine_used": "groq" | "ollama" | "fallback_template", "ai_provider": str, "dlp_active": bool}
     """
     dlp_active = False
     clean_text = raw_text or ""
@@ -30,50 +40,72 @@ async def generate_threat_explanation(
     if dlp_masking and clean_text:
         clean_text, dlp_active = sanitize_text(clean_text)
 
-    # Extract key telemetry for the prompt
-    subject = evidence.get("subject") or "Untitled"
-    sender = evidence.get("sender") or "Unknown"
-    sender_domain = evidence.get("sender_domain") or "Unknown"
-    candidate_ip = evidence.get("earliest_public_ip") or "None"
-    score = evidence.get("score", 0)
+    # Extract forensic telemetry for the defensive SOC auditor prompt
     verdict = evidence.get("verdict", "SAFE")
-    penalties = evidence.get("penalties", [])
+    score = evidence.get("score", 0)
 
-    penalty_rules = [p.get("rule", str(p)) for p in penalties] if isinstance(penalties, list) else []
-    triggers_str = ", ".join(penalty_rules) if penalty_rules else "Zero penalties triggered"
+    # Authentication claim audit
+    spf_status = evidence.get("spf_status")
+    dkim_status = evidence.get("dkim_status")
+    dmarc_status = evidence.get("dmarc_status")
 
-    # Truncate body if very long to fit fast reasoning window
-    body_snippet = clean_text[:1200] if len(clean_text) > 1200 else clean_text
+    auth = evidence.get("auth")
+    if isinstance(auth, dict):
+        if not spf_status:
+            spf_val = auth.get("spf", {})
+            spf_status = (spf_val.get("status") if isinstance(spf_val, dict) else str(spf_val))
+        if not dkim_status:
+            dkim_val = auth.get("dkim", {})
+            dkim_status = (dkim_val.get("status") if isinstance(dkim_val, dict) else str(dkim_val))
+        if not dmarc_status:
+            dmarc_val = auth.get("dmarc", {})
+            dmarc_status = (dmarc_val.get("status") if isinstance(dmarc_val, dict) else str(dmarc_val))
 
-    # Dynamic prompt construction based on verdict and risk score
-    if verdict == "SAFE" or score < 20:
-        analyst_prompt = (
-            f"You are an Elite SOC Analyst. The email has PASSED cryptographic authentication (SPF/DKIM/DMARC) and forensic audit with a SAFE risk score of {score}/100.\n"
-            "Write a concise 2-3 sentence executive clearance notice:\n"
-            "1. Confirm the communication is legitimate, authentic corporate or marketing traffic from the verified sender domain.\n"
-            "2. Note that telemetry verified SPF/DKIM integrity and zero malicious payloads or deceptive links were found.\n"
-            "3. Action: Permit inbox delivery with standard telemetry logging; no blocking, quarantine, or containment is required.\n"
-            "DO NOT declare this message as phishing, malware, or an attack."
-        )
+    spf_status = spf_status or "UNKNOWN"
+    dkim_status = dkim_status or "UNKNOWN"
+    dmarc_status = dmarc_status or "UNKNOWN"
+
+    origin_ip = evidence.get("earliest_public_ip") or evidence.get("origin_ip") or "None"
+
+    asn = evidence.get("asn")
+    if not asn:
+        hops = evidence.get("hops", [])
+        if isinstance(hops, list) and hops:
+            first_hop = hops[0] if isinstance(hops[0], dict) else {}
+            asn = first_hop.get("asn_org") or (f"AS{first_hop.get('asn')}" if first_hop.get("asn") else None)
+    asn = asn or "Unknown"
+
+    penalties_raw = evidence.get("penalties", [])
+    if isinstance(penalties_raw, list) and penalties_raw:
+        penalty_items = []
+        for p in penalties_raw:
+            if isinstance(p, dict):
+                rule = p.get("rule", "Anomaly")
+                pts = p.get("penalty")
+                penalty_items.append(f"{rule} (+{pts})" if pts is not None else rule)
+            else:
+                penalty_items.append(str(p))
+        penalties_str = ", ".join(penalty_items) if penalty_items else "None"
+    elif isinstance(penalties_raw, str) and penalties_raw.strip():
+        penalties_str = penalties_raw.strip()
     else:
-        analyst_prompt = (
-            f"You are an Elite SOC Analyst. A potential email threat was detected with a risk score of {score}/100 ({verdict}).\n"
-            "Write a 3-sentence threat briefing:\n"
-            "1. Specific attack vector and attacker intent.\n"
-            "2. Telemetry proof (headers, hops, links, or lure keywords).\n"
-            "3. Immediate SOC containment action (quarantine, block sender/IP)."
-        )
+        penalties_str = "None"
 
+    subject = evidence.get("subject") or "Untitled"
+    if dlp_masking and subject != "Untitled":
+        subject, subj_dlp = sanitize_text(subject)
+        if subj_dlp:
+            dlp_active = True
+
+    # Passive evidentiary SOC evaluation template (objective, refusal-resistant)
     prompt = (
-        f"{analyst_prompt}\n\n"
-        f"--- TELEMETRY ---\n"
-        f"Subject: {subject}\n"
-        f"Sender: {sender} (Domain: {sender_domain})\n"
-        f"Candidate Origin IP: {candidate_ip}\n"
-        f"Evaluated Risk Score: {score}/100 ({verdict})\n"
-        f"Triggered Threat Indicators: {triggers_str}\n\n"
-        f"--- SANITIZED EMAIL BODY SNIPPET ---\n"
-        f"{body_snippet}\n"
+        "Forensic Case Telemetry:\n"
+        f"- Final Verdict: {verdict} (Score: {score}/100)\n"
+        f"- Authentication Claim Audit: SPF={spf_status}, DKIM={dkim_status}, DMARC={dmarc_status}\n"
+        f"- Observed Infrastructure: IP {origin_ip} (ASN: {asn})\n"
+        f"- Triggered Indicators: {penalties_str}\n"
+        f"- Subject: {subject}\n\n"
+        "Explain why the message received this verdict based strictly on the telemetry above in exactly 2 concise, factual sentences."
     )
 
     # Universal DLP Warning & Liability Alert System
@@ -96,44 +128,71 @@ async def generate_threat_explanation(
             "liability_disclaimed": False,
         }
 
-    # 2. Tier 1: Groq Cloud Provider (3.5s timeout)
+    # 2. Tier 1: Groq Cloud Provider (4.0s timeout)
     try:
-        summary = await generate_groq_briefing(prompt)
-        logger.info("Successfully generated threat briefing via Groq cloud engine.")
+        raw_summary = await generate_groq_briefing(prompt, system_prompt=VAJRA_SOC_SYSTEM_PROMPT)
+        if raw_summary:
+            raw_summary = raw_summary.strip()
+            norm_groq = raw_summary.lower()
+            if len(raw_summary) < 25 or any(t in norm_groq for t in REFUSAL_TRIGGERS):
+                logger.warning("Groq safety refusal detected; failing over to Tier 2 (Ollama).")
+                raw_summary = None
+
+        if not raw_summary:
+            raise ValueError("Groq returned empty or refused response.")
+
+        logger.info("Successfully generated threat briefing via Tier 1 Groq cloud engine.")
+        summary = f"[Engine: Groq Cloud Reasoning] {raw_summary}"
         return {
             "summary": summary,
             "engine_used": "groq",
+            "ai_provider": "groq",
             "dlp_active": dlp_active,
             "dlp_security": dlp_security,
         }
     except Exception as groq_err:
-        logger.warning(f"Groq provider unavailable or failed ({groq_err}); failing over to Ollama.")
+        logger.warning(f"Tier 1 (Groq) unavailable or failed ({groq_err}); failing over to Tier 2 (Ollama).")
 
-    # 3. Tier 2: Ollama Local Air-Gapped Provider (5.0s timeout)
+    # 3. Tier 2: Ollama Local Air-Gapped Provider (15.0s timeout)
     try:
-        summary = await generate_ollama_briefing(prompt)
-        logger.info("Successfully generated threat briefing via Ollama local engine.")
-        return {
-            "summary": summary,
-            "engine_used": "ollama",
-            "dlp_active": dlp_active,
-            "dlp_security": dlp_security,
-        }
-    except Exception as ollama_err:
-        logger.warning(f"Ollama provider unavailable or failed ({ollama_err}); falling back to deterministic template.")
+        raw_summary = await generate_ollama_briefing(prompt, system_prompt=VAJRA_SOC_SYSTEM_PROMPT)
+        if raw_summary:
+            raw_summary = raw_summary.strip()
+            normalized_summary = raw_summary.lower()
+            if len(raw_summary) < 25 or any(trigger in normalized_summary for trigger in REFUSAL_TRIGGERS):
+                logger.warning("Ollama safety refusal detected. Discarding output and falling back to Tier 3 Heuristics.")
+                raw_summary = None
 
-    # 4. Tier 3: Deterministic Forensic Static Template
-    fallback_summary = get_static_briefing_template(
+        if not raw_summary:
+            logger.warning("Tier 2 (Ollama) output invalid or refused; falling back to Tier 3 (Deterministic Template).")
+        else:
+            logger.info("Successfully generated threat briefing via Tier 2 Ollama local engine.")
+            summary = f"[Engine: Local Air-Gapped Ollama ({settings.OLLAMA_MODEL})] {raw_summary}"
+            return {
+                "summary": summary,
+                "engine_used": "ollama",
+                "ai_provider": "ollama",
+                "dlp_active": dlp_active,
+                "dlp_security": dlp_security,
+            }
+    except Exception as ollama_err:
+        logger.warning(f"Tier 2 (Ollama) unavailable or failed ({ollama_err}); falling back to Tier 3 (Deterministic Template).")
+
+    # 4. Tier 3: Deterministic Forensic Static Template (Guaranteed Offline / Air-Gapped)
+    sender = evidence.get("sender") or "Unknown"
+    raw_fallback = get_static_briefing_template(
         score=score,
         verdict=verdict,
-        penalties=penalties if isinstance(penalties, list) else [],
+        penalties=penalties_raw if isinstance(penalties_raw, list) else [],
         sender=sender,
         subject=subject,
     )
+    fallback_summary = f"[Engine: Deterministic Heuristic Fallback] {raw_fallback.strip()}"
 
     return {
         "summary": fallback_summary,
         "engine_used": "fallback_template",
+        "ai_provider": "heuristic",
         "dlp_active": dlp_active,
         "dlp_security": dlp_security,
     }

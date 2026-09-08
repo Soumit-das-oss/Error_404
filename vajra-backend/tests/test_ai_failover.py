@@ -146,18 +146,22 @@ async def test_ai_prompt_safe_verdict_generates_clearance_notice():
         "score": 10,
         "verdict": "SAFE",
         "penalties": [],
+        "spf_status": "PASS",
+        "dkim_status": "PASS",
+        "dmarc_status": "PASS",
     }
     with patch("app.services.ai.explainer_orchestrator.generate_groq_briefing") as mock_groq:
-        mock_groq.return_value = "Verified authentic newsletter. Zero malicious indicators found. Permit delivery."
+        mock_groq.return_value = "Verified authentic newsletter. Zero malicious indicators found. Clean delivery recommended."
         result = await generate_threat_explanation(evidence, "Apply within 24 hours.", dlp_masking=False)
 
         assert result["engine_used"] == "groq"
         # Verify the captured prompt passed to LLM
         prompt_passed = mock_groq.call_args[0][0]
-        assert "PASSED cryptographic authentication (SPF/DKIM/DMARC)" in prompt_passed
-        assert "DO NOT declare this message as phishing, malware, or an attack" in prompt_passed
-        assert "SAFE risk score of 10/100" in prompt_passed
-        assert "Permit inbox delivery with standard telemetry logging" in prompt_passed
+        assert "Forensic Case Telemetry:" in prompt_passed
+        assert "- Final Verdict: SAFE (Score: 10/100)" in prompt_passed
+        assert "- Authentication Claim Audit: SPF=PASS, DKIM=PASS, DMARC=PASS" in prompt_passed
+        assert "- Subject: Internship Match" in prompt_passed
+        assert "Explain why the message received this verdict based strictly on the telemetry above in exactly 2 concise, factual sentences." in prompt_passed
 
 
 @pytest.mark.asyncio
@@ -169,6 +173,8 @@ async def test_ai_prompt_threat_verdict_generates_incident_triage():
         "score": 85,
         "verdict": "MALICIOUS",
         "penalties": [{"rule": "Deceptive Hyperlink", "penalty": 25}],
+        "earliest_public_ip": "185.220.101.5",
+        "asn": "AS9009 M247 Europe",
     }
     with patch("app.services.ai.explainer_orchestrator.generate_groq_briefing") as mock_groq:
         mock_groq.return_value = "Phishing threat detected. Deceptive links observed. Quarantine immediately."
@@ -176,5 +182,172 @@ async def test_ai_prompt_threat_verdict_generates_incident_triage():
 
         assert result["engine_used"] == "groq"
         prompt_passed = mock_groq.call_args[0][0]
-        assert "potential email threat was detected with a risk score of 85/100 (MALICIOUS)" in prompt_passed
-        assert "Immediate SOC containment action (quarantine, block sender/IP)" in prompt_passed
+        assert "Forensic Case Telemetry:" in prompt_passed
+        assert "- Final Verdict: MALICIOUS (Score: 85/100)" in prompt_passed
+        assert "- Observed Infrastructure: IP 185.220.101.5 (ASN: AS9009 M247 Europe)" in prompt_passed
+        assert "Deceptive Hyperlink (+25)" in prompt_passed
+        assert "- Subject: Immediate Action Required" in prompt_passed
+        assert "Explain why the message received this verdict based strictly on the telemetry above in exactly 2 concise, factual sentences." in prompt_passed
+
+
+@pytest.mark.asyncio
+async def test_ai_orchestrator_service_export_and_3tier_failover():
+    from app.services.ai_orchestrator import generate_threat_explanation as orch_generate
+    evidence = {
+        "subject": "System Alert",
+        "sender": "sec@corp.com",
+        "score": 15,
+        "verdict": "SAFE",
+        "penalties": [],
+    }
+    with patch("app.services.ai.explainer_orchestrator.generate_groq_briefing", side_effect=Exception("Network disconnected")):
+        with patch("app.services.ai.explainer_orchestrator.generate_ollama_briefing", side_effect=Exception("Ollama offline")):
+            result = await orch_generate(evidence, "Routine status message.", dlp_masking=True)
+            assert result["engine_used"] == "fallback_template"
+            assert result["ai_provider"] == "heuristic"
+            assert result["summary"].startswith("[Engine: Deterministic Heuristic Fallback]")
+            assert result["dlp_security"]["status"] == "ACTIVE"
+            assert "CLEARANCE" in result["summary"] or "AUTHENTIC" in result["summary"] or "SAFE" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_ai_engine_prefix_and_provider_attribution():
+    evidence = {
+        "subject": "Test Attributions",
+        "sender": "sec@test.org",
+        "score": 75,
+        "verdict": "MALICIOUS",
+        "penalties": [{"rule": "Deceptive Hyperlink", "penalty": 25}],
+    }
+
+    # 1. Groq attribution
+    with patch("app.services.ai.explainer_orchestrator.generate_groq_briefing") as mock_groq:
+        mock_groq.return_value = "Phishing attack detected."
+        res_groq = await generate_threat_explanation(evidence, "Phishing lure body", dlp_masking=True)
+        assert res_groq["ai_provider"] == "groq"
+        assert res_groq["summary"].startswith("[Engine: Groq Cloud Reasoning]")
+
+    # 2. Ollama attribution
+    with patch("app.services.ai.explainer_orchestrator.generate_groq_briefing", side_effect=Exception("Groq down")):
+        with patch("app.services.ai.explainer_orchestrator.generate_ollama_briefing") as mock_ollama:
+            mock_ollama.return_value = "Air-gapped analysis detected anomaly."
+            res_ollama = await generate_threat_explanation(evidence, "Phishing lure body", dlp_masking=True)
+            assert res_ollama["ai_provider"] == "ollama"
+            assert res_ollama["summary"].startswith("[Engine: Local Air-Gapped Ollama")
+
+    # 3. Deterministic Heuristic Fallback attribution
+    with patch("app.services.ai.explainer_orchestrator.generate_groq_briefing", side_effect=Exception("Groq down")):
+        with patch("app.services.ai.explainer_orchestrator.generate_ollama_briefing", side_effect=Exception("Ollama down")):
+            res_fall = await generate_threat_explanation(evidence, "Phishing lure body", dlp_masking=True)
+            assert res_fall["ai_provider"] == "heuristic"
+            assert res_fall["summary"].startswith("[Engine: Deterministic Heuristic Fallback]")
+
+
+def test_pdf_report_renders_engine_attribution():
+    from app.services.report_generator import generate_case_pdf
+
+    for provider in ["groq", "ollama", "heuristic"]:
+        dummy_case = {
+            "case_id": f"CAS-TEST-{provider.upper()}",
+            "sha256": "abcdef0123456789" * 4,
+            "subject": f"Security Notice ({provider})",
+            "sender": "alert@example.com",
+            "sender_display_name": "Security Alert",
+            "earliest_public_ip": "1.2.3.4",
+            "message_id": "<test@example.com>",
+            "score": 45,
+            "verdict": "SUSPICIOUS",
+            "ai_provider": provider,
+            "llm_summary": f"[Engine: {provider.capitalize()}] Suspicious activity observed across relays.",
+            "auth": {
+                "spf": {"status": "PASS", "details": "v=spf1 include:_spf.google.com ~all"},
+                "dkim": {"status": "PASS", "details": "Signature verified"},
+                "dmarc": {"status": "PASS", "details": "p=reject"},
+            },
+            "hops": [
+                {"hop_number": 1, "ip": "1.2.3.4", "city": "Mumbai", "country": "India", "asn": 13335, "asn_org": "Cloudflare", "is_tor_exit": False, "delay_seconds": 1.2}
+            ],
+            "risk": {
+                "score": 45,
+                "verdict": "SUSPICIOUS",
+                "penalties": [{"rule": "Urgency Lure", "penalty": 20, "reason": "High urgency keywords detected"}],
+            },
+            "attachments": [
+                {"filename": "invoice.pdf", "content_type": "application/pdf", "size_bytes": 1024, "sha256": "1234567890abcdef"}
+            ],
+            "dlp_security": {"status": "ACTIVE", "masking_active": True},
+        }
+        pdf_bytes = generate_case_pdf(dummy_case)
+        assert pdf_bytes.startswith(b"%PDF")
+        assert len(pdf_bytes) > 1000
+
+
+@pytest.mark.asyncio
+async def test_ollama_safety_refusal_triggers_fallback_to_heuristic():
+    evidence = {
+        "subject": "Wire Transfer Notice",
+        "sender": "ceo@impersonate.com",
+        "score": 90,
+        "verdict": "MALICIOUS",
+        "penalties": [{"rule": "Free Webmail BEC", "penalty": 40}],
+    }
+
+    refusal_samples = [
+        "I cannot assist with this request as an AI.",
+        "I apologize, I am unable to analyze this email against my safety guidelines.",
+        "As an AI, I cannot fulfill this request.",
+        "I can't assist with cyber threats or malicious analysis.",
+        "Against my safety rules.",
+        "Short",  # < 25 chars
+    ]
+
+    for refusal_output in refusal_samples:
+        with patch("app.services.ai.explainer_orchestrator.generate_groq_briefing", side_effect=Exception("Groq offline")):
+            with patch("app.services.ai.explainer_orchestrator.generate_ollama_briefing") as mock_ollama:
+                mock_ollama.return_value = refusal_output
+                result = await generate_threat_explanation(evidence, "Send the funds now.", dlp_masking=True)
+
+                assert result["engine_used"] == "fallback_template"
+                assert result["ai_provider"] == "heuristic"
+                assert result["summary"].startswith("[Engine: Deterministic Heuristic Fallback]")
+                assert "[Engine: Local Air-Gapped Ollama]" not in result["summary"]
+                assert refusal_output not in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_ollama_provider_direct_refusal_and_short_response():
+    from app.services.ai.ollama_provider import generate_ollama_briefing
+
+    mock_resp_refusal = MagicMock()
+    mock_resp_refusal.json.return_value = {"response": "I cannot assist with evaluating security risks."}
+    mock_resp_refusal.raise_for_status = MagicMock()
+
+    mock_resp_short = MagicMock()
+    mock_resp_short.json.return_value = {"response": "Hello"}
+    mock_resp_short.raise_for_status = MagicMock()
+
+    mock_resp_valid = MagicMock()
+    mock_resp_valid.json.return_value = {
+        "response": "The email passed SPF and DKIM with verified origin MTA from corporate infrastructure."
+    }
+    mock_resp_valid.raise_for_status = MagicMock()
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+
+        # 1. Refusal trigger -> returns None
+        mock_client.post.return_value = mock_resp_refusal
+        res = await generate_ollama_briefing("Test prompt")
+        assert res is None
+
+        # 2. Short response (< 25 chars) -> returns None
+        mock_client.post.return_value = mock_resp_short
+        res = await generate_ollama_briefing("Test prompt")
+        assert res is None
+
+        # 3. Valid response -> returns string
+        mock_client.post.return_value = mock_resp_valid
+        res = await generate_ollama_briefing("Test prompt")
+        assert res == "The email passed SPF and DKIM with verified origin MTA from corporate infrastructure."
+

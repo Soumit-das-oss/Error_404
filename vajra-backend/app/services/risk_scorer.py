@@ -10,8 +10,12 @@ from app.core.constants import (
     PENALTY_DMARC_FAIL,
     PENALTY_DECEPTIVE_LINK,
     PENALTY_QUISHING_QR,
+    PENALTY_QUISHING_MALICIOUS,
     PENALTY_URGENCY_INDICATORS,
     PENALTY_FREE_WEBMAIL_LURE,
+    PENALTY_FREE_WEBMAIL_BRAND_IMPERSONATION,
+    PENALTY_IN_BODY_HEADER_SPOOFING,
+    PENALTY_TYPOSQUAT_BRAND,
     PENALTY_PDF_JAVASCRIPT,
     PENALTY_PDF_LAUNCH,
     VERDICT_SAFE,
@@ -21,6 +25,7 @@ from app.core.constants import (
     THRESHOLD_SUSPICIOUS_MAX,
     FREE_WEBMAIL_DOMAINS,
 )
+from app.services.detectors.brand_registry import check_brand_typosquatting
 
 
 def calculate_risk_score(
@@ -41,26 +46,13 @@ def calculate_risk_score(
     has_pdf_launch: bool = False,
     pdf_deceptive_links: Optional[List[Dict[str, Any]]] = None,
     is_authentic_pdf: bool = False,
+    is_free_webmail_brand_impersonation: bool = False,
+    commercial_matches: Optional[List[str]] = None,
+    has_in_body_header_spoofing: bool = False,
+    in_body_spoof_detail: Optional[str] = None,
+    typosquat_urls: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Calculate deterministic 0-100 threat score based on forensic evidence.
-
-    Penalties:
-      - SPF Fail: +15
-      - DKIM Fail: +15
-      - DMARC Fail: +15
-      - Deceptive Link: +25
-      - Quishing QR: +40
-      - Urgency / Coercive Indicators: +20
-      - Free Webmail Financial/BEC Lure: +35
-
-    Verdicts:
-      - 0 to 19: SAFE
-      - 20 to 59: SUSPICIOUS
-      - 60 to 100: MALICIOUS
-
-    Hard Forensic Override:
-      - Non-empty qr_urls or deceptive_links enforces minimum verdict of SUSPICIOUS.
-    """
+    """Calculate deterministic 0-100 threat score based on forensic evidence."""
     total_score = 0
     penalties: List[Dict[str, Any]] = []
 
@@ -105,8 +97,42 @@ def calculate_risk_score(
             "reason": f"DMARC validation failed with status {dmarc_status}{policy_note}. Identifier alignment failed.",
         })
 
-    # 4. Deceptive Link (+25)
-    if deceptive_links:
+    # 4. Deceptive Link & Typosquatting (+45 / +25)
+    has_typosquat = False
+    typo_items = list(typosquat_urls or [])
+    for d in (deceptive_links or []):
+        if d.get("indicator") == "TYPOSQUAT_BRAND_IMPERSONATION":
+            has_typosquat = True
+            if d not in typo_items:
+                typo_items.append(d)
+
+    if has_typosquat or typo_items:
+        penalty = PENALTY_TYPOSQUAT_BRAND
+        total_score += penalty
+        first_typo = typo_items[0]
+        brand_tgt = first_typo.get("matched_brand") or first_typo.get("display_domain") or "protected brand"
+        fake_dom = first_typo.get("target_domain") or first_typo.get("actual_href") or "deceptive domain"
+        penalties.append({
+            "rule": "TYPOSQUAT_BRAND_IMPERSONATION",
+            "penalty": penalty,
+            "reason": (
+                f"Typosquatting/brand impersonation detected: domain '{fake_dom}' "
+                f"mimics protected brand '{brand_tgt}'."
+            ),
+        })
+        other_deceptive = [d for d in (deceptive_links or []) if d.get("indicator") != "TYPOSQUAT_BRAND_IMPERSONATION"]
+        if other_deceptive:
+            total_score += PENALTY_DECEPTIVE_LINK
+            penalties.append({
+                "rule": "Deceptive Hyperlink",
+                "penalty": PENALTY_DECEPTIVE_LINK,
+                "reason": (
+                    f"Discovered {len(other_deceptive)} disguised link(s) where anchor text "
+                    f"mimics legitimate domain '{other_deceptive[0].get('display_domain')}' "
+                    f"but routes to '{other_deceptive[0].get('target_domain')}'."
+                ),
+            })
+    elif deceptive_links:
         penalty = PENALTY_DECEPTIVE_LINK
         total_score += penalty
         penalties.append({
@@ -119,10 +145,36 @@ def calculate_risk_score(
             ),
         })
 
-    # 5. Quishing QR (+40) Evaluation
-    # Only penalize when QR is actively suspicious (e.g. direct IP, shortener, phishing endpoint).
-    # Benign QR codes receive 0 penalty and allow clean SAFE evaluation.
-    if quishing_detected:
+    # 5. Quishing QR Evaluation & Cross-Channel Linkage
+    qr_has_typosquat = False
+    qr_matched_brand = None
+    for q_url in (qr_urls or []):
+        q_typo = check_brand_typosquatting(q_url)
+        if q_typo:
+            qr_has_typosquat = True
+            qr_matched_brand = q_typo.get("matched_brand")
+            break
+        for d in (deceptive_links or []):
+            if d.get("actual_href") == q_url or (d.get("target_domain") and d.get("target_domain") in q_url):
+                qr_has_typosquat = True
+                qr_matched_brand = d.get("display_domain") or d.get("target_domain")
+                break
+
+    if qr_has_typosquat:
+        quishing_detected = True
+        is_suspicious_qr = True
+
+    if qr_has_typosquat:
+        penalty = PENALTY_QUISHING_MALICIOUS
+        total_score += penalty
+        brand_info = f" targeting brand '{qr_matched_brand}'" if qr_matched_brand else ""
+        penalties.append({
+            "rule": "QUISHING_MALICIOUS_PAYLOAD",
+            "penalty": penalty,
+            "reason": f"Decoded {len(qr_urls or [1])} malicious embedded visual QR code link(s) leading to deceptive/typosquatted endpoints{brand_info}.",
+        })
+        total_score = max(total_score, 60)
+    elif quishing_detected:
         if is_suspicious_qr:
             penalty = PENALTY_QUISHING_QR
             total_score += penalty
@@ -166,10 +218,6 @@ def calculate_risk_score(
     is_fully_authenticated = (spf_status == "PASS" and dkim_status == "PASS" and dmarc_status == "PASS")
 
     if is_free_webmail_sender and (has_urgency or has_financial_lure or is_free_webmail_lure):
-        # Free Webmail BEC / Phishing Rule:
-        # Senders originating from free webmail accounts are NEVER legitimate corporate newsletters.
-        # Trigger COERCIVE_URGENCY (+20) and FREE_WEBMAIL_FINANCIAL_LURE (+35).
-        # No newsletter discount granted. Score floor >= 55.
         total_score += PENALTY_URGENCY_INDICATORS
         penalties.append({
             "rule": "COERCIVE_URGENCY",
@@ -187,10 +235,8 @@ def calculate_risk_score(
         total_score = max(total_score, 55)
 
     else:
-        # Legitimate corporate / non-free domain or standard flow
         if has_urgency:
             if is_fully_authenticated and not is_free_webmail_sender and not deceptive_links and not qr_urls:
-                # Clean authentic corporate marketing/newsletter emails with deadlines stay within SAFE tier (0-15)
                 penalty = 10
                 rule_name = "Marketing / Newsletter Time-Sensitive Notice"
                 reason_text = f"Authenticated sender with promotional / newsletter deadline copy: '{matches_str}'."
@@ -214,6 +260,27 @@ def calculate_risk_score(
                 "penalty": penalty,
                 "reason": lure_reason or "Executive or institutional authority claimed from free public webmail account.",
             })
+
+    # 7b. Commercial Brand Impersonation from Free Webmail (+40)
+    if is_free_webmail_brand_impersonation:
+        penalty = PENALTY_FREE_WEBMAIL_BRAND_IMPERSONATION
+        total_score += penalty
+        comm_str = ", ".join(commercial_matches[:3]) if commercial_matches else "commercial brand lures"
+        penalties.append({
+            "rule": "FREE_WEBMAIL_BRAND_IMPERSONATION",
+            "penalty": penalty,
+            "reason": f"Free webmail provider '{sender_dom or 'public webmail'}' used for commercial enterprise brand lure: '{comm_str}'.",
+        })
+
+    # 7c. In-Body Header Forgery (+35)
+    if has_in_body_header_spoofing:
+        penalty = PENALTY_IN_BODY_HEADER_SPOOFING
+        total_score += penalty
+        penalties.append({
+            "rule": "IN_BODY_HEADER_SPOOFING",
+            "penalty": penalty,
+            "reason": in_body_spoof_detail or "In-body header forgery detected: fake header contradicts envelope sender.",
+        })
 
     # 8. Deep PDF Telemetry Analysis
     if has_pdf_launch:
@@ -249,6 +316,18 @@ def calculate_risk_score(
             "reason": "Authentic PDF Document Inspected: standard text and clean links; zero malicious exploitation tags detected.",
         })
 
+    # High-Confidence Deceptive Vector Scoring Calibration
+    # Free webmail sending commercial brand lures, typosquats, quishing, or in-body forged headers
+    # proves malicious intent regardless of SPF/DKIM infrastructure validity.
+    has_high_confidence_deception = (
+        has_typosquat
+        or qr_has_typosquat
+        or is_free_webmail_brand_impersonation
+        or has_in_body_header_spoofing
+    )
+    if has_high_confidence_deception:
+        total_score = max(total_score, 75)
+
     # Bound score strictly to [0, 100]
     bounded_score = min(100, max(0, total_score))
 
@@ -264,11 +343,12 @@ def calculate_risk_score(
     # Active malicious QR or deceptive links must never receive a SAFE verdict
     has_active_malicious_qr = (quishing_detected or bool(qr_urls)) and is_suspicious_qr
     has_active_pdf_threat = has_pdf_javascript or has_pdf_launch or bool(pdf_deceptive_links)
-    if (has_active_malicious_qr or deceptive_links or has_active_pdf_threat) and verdict == VERDICT_SAFE:
+    if (has_active_malicious_qr or deceptive_links or has_active_pdf_threat or has_high_confidence_deception) and verdict == VERDICT_SAFE:
         verdict = VERDICT_SUSPICIOUS
 
     return {
         "score": bounded_score,
         "verdict": verdict,
         "penalties": penalties,
+        "quishing_detected": quishing_detected or qr_has_typosquat,
     }

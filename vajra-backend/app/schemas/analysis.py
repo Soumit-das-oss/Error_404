@@ -14,9 +14,9 @@ class HopDTO(BaseModel):
     hop_number: int = Field(..., description="1-indexed chronological hop index (1 = earliest entry MTA)")
     ip: str = Field(..., description="Extracted IPv4 or IPv6 address")
     hostname: Optional[str] = Field(None, description="Reported or reverse-DNS hostname")
-    country: Optional[str] = Field(None, description="Country name resolved via GeoIP")
+    country: Optional[str] = Field(None, description="Country name resolved via GeoIP (probable sending infrastructure geolocation)")
     country_code: Optional[str] = Field(None, description="ISO two-letter country code")
-    city: Optional[str] = Field(None, description="City name resolved via GeoIP")
+    city: Optional[str] = Field(None, description="City name resolved via GeoIP (probable sending infrastructure geolocation)")
     latitude: Optional[float] = Field(None, description="Geographical latitude")
     longitude: Optional[float] = Field(None, description="Geographical longitude")
     asn: Optional[int] = Field(None, description="Autonomous System Number")
@@ -29,7 +29,8 @@ class HopDTO(BaseModel):
 class AuthStatusDetailDTO(BaseModel):
     """Cryptographic and DNS Email Authentication Sub-Check."""
     status: str = Field(..., description="Status: PASS, FAIL, SOFTFAIL, NEUTRAL, NONE, or UNKNOWN")
-    details: str = Field(..., description="Forensic context, cryptographic validation status or error logs")
+    details: str = Field(..., description="Forensic context, cryptographic validation status, or upstream MTA audit logs")
+    source: Optional[str] = Field("recorded_mta", description="Verification source: 'live_dns', 'cryptographic', or 'recorded_mta'")
 
 
 class DmarcDetailDTO(BaseModel):
@@ -37,6 +38,7 @@ class DmarcDetailDTO(BaseModel):
     status: str = Field(..., description="Status: PASS, FAIL, NONE, or UNKNOWN")
     policy: str = Field(..., description="Configured DMARC policy: reject, quarantine, none, or missing")
     details: str = Field(..., description="Forensic record context or alignment status")
+    source: Optional[str] = Field("recorded_mta", description="Verification source: 'live_dns', or 'recorded_mta'")
 
 
 class AuthMatrixDTO(BaseModel):
@@ -47,7 +49,7 @@ class AuthMatrixDTO(BaseModel):
 
 
 class RecordedAuthClaimDTO(BaseModel):
-    """Authentication claims recorded directly in the raw email headers by intermediate MTAs."""
+    """Recorded header authentication evaluation (audit of upstream MTA claims)."""
     authentication_results: List[str] = Field(
         default_factory=list,
         description="Raw Authentication-Results header lines as claimed in message"
@@ -63,7 +65,7 @@ class RecordedAuthClaimDTO(BaseModel):
 
 
 class IndependentVerificationDTO(BaseModel):
-    """Independent verification performed directly by the VAJRA forensic engine."""
+    """Cryptographic DKIM signature verification and local/DNS evaluation performed by VAJRA engine."""
     spf: AuthStatusDetailDTO
     dkim: AuthStatusDetailDTO
     dmarc: DmarcDetailDTO
@@ -114,7 +116,7 @@ class PenaltyItemDTO(BaseModel):
 
 
 class RiskBreakdownDTO(BaseModel):
-    """Deterministic Security Scoring Matrix (0–100 Scale)."""
+    """Evidence-based heuristic and explainable rule-based detection engine scoring (0–100 Scale)."""
     score: int = Field(..., ge=0, le=100, description="Risk score from 0 (harmless) to 100 (critical threat)")
     verdict: str = Field(..., description="SAFE (0-19), SUSPICIOUS (20-59), MALICIOUS (60-100), or INCOMPLETE_ANALYSIS")
     itemized_penalties: List[PenaltyItemDTO] = Field(
@@ -136,9 +138,9 @@ class AttachmentMetaDTO(BaseModel):
 
 
 class DlpSecurityDTO(BaseModel):
-    """Data Loss Prevention compliance audit and liability disclaimer status."""
+    """Data Loss Prevention compliance audit and liability disclaimer status (targeting cards, banking details, phones, names)."""
     status: str = Field("ACTIVE", description="ACTIVE or BYPASSED")
-    masking_active: bool = Field(True, description="True if local PII masking was enforced")
+    masking_active: bool = Field(True, description="True if local PII masking (cards, IBANs, phones, names) was enforced")
     compliance_alert: Optional[str] = Field(None, description="Regulatory and liability warning if bypassed")
     liability_disclaimed: bool = Field(False, description="True if platform disclaims liability due to manual bypass")
 
@@ -174,7 +176,11 @@ class RawEmailRequest(BaseModel):
 
 
 class CaseResponseDTO(BaseModel):
-    """Comprehensive Forensic Intelligence Response for UI and API integration."""
+    """Comprehensive Forensic Intelligence Response.
+
+    Note: Case storage in memory is intentionally ephemeral to preserve zero-disk hygiene;
+    the downloadable cryptographic PDF dossier serves as the permanent evidentiary artifact.
+    """
     case_id: str = Field(..., description="Unique immutable forensic case identifier (e.g. CAS-...)")
     sha256: str = Field(..., description="Cryptographic SHA-256 hash of raw input payload")
     subject: Optional[str] = Field(None, description="Extracted email subject line")
@@ -186,7 +192,7 @@ class CaseResponseDTO(BaseModel):
     date: Optional[str] = Field(None, description="Origination timestamp from email header")
     message_id: Optional[str] = Field(None, description="RFC 5322 Message-ID header")
     return_path: Optional[str] = Field(None, description="Return-Path envelope address")
-    earliest_public_ip: Optional[str] = Field(None, description="First public origin entry MTA IP")
+    earliest_public_ip: Optional[str] = Field(None, description="First public origin entry MTA IP (sending infrastructure)")
     auth: AuthMatrixDTO = Field(..., description="SPF, DKIM, and DMARC forensic audit")
     recorded_authentication: RecordedAuthClaimDTO = Field(
         default_factory=RecordedAuthClaimDTO,
@@ -206,10 +212,11 @@ class CaseResponseDTO(BaseModel):
     )
     hops: List[HopDTO] = Field(default_factory=list, description="Ordered reverse MTA hop traversal")
     attachments: List[AttachmentMetaDTO] = Field(default_factory=list, description="Attachment metadata")
-    risk: RiskBreakdownDTO = Field(..., description="Deterministic scoring matrix and verdict")
+    risk: RiskBreakdownDTO = Field(..., description="Evidence-based heuristic scoring matrix and verdict")
     verdict: Optional[str] = Field(None, description="Overall forensic verdict reflecting overrides (SAFE, SUSPICIOUS, MALICIOUS, INCOMPLETE_ANALYSIS)")
     quishing_detected: Optional[bool] = Field(False, description="True if a QR code quishing vector was identified")
     llm_summary: str = Field(..., description="2-3 sentence cyber threat analyst executive brief")
+    ai_provider: str = Field("heuristic", description="AI reasoning engine: groq, ollama, or heuristic")
     dlp_security: DlpSecurityDTO = Field(
         default_factory=lambda: DlpSecurityDTO(
             status="ACTIVE",

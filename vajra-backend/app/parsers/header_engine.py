@@ -280,6 +280,8 @@ def audit_authentication_headers(
     combined_auth = " ".join(auth_results).lower()
     combined_spf = " ".join(received_spf).lower()
 
+    dkim_source = "recorded_mta"
+
     # 1. Audit SPF
     if (
         "spf=pass" in combined_auth
@@ -315,6 +317,7 @@ def audit_authentication_headers(
                 if dkim.verify(raw_bytes):
                     dkim_status = "PASS"
                     dkim_details = "DKIM mathematically verified via local dkimpy engine."
+                    dkim_source = "cryptographic"
                 else:
                     dkim_status = "FAIL"
                     dkim_details = "DKIM signature invalid or payload altered."
@@ -344,7 +347,7 @@ def audit_authentication_headers(
         dmarc_details = f"DMARC policy enforcement failed (policy={dmarc_policy})."
 
     return {
-        "spf": {"status": spf_status, "details": spf_details},
-        "dkim": {"status": dkim_status, "details": dkim_details},
-        "dmarc": {"status": dmarc_status, "policy": dmarc_policy, "details": dmarc_details},
+        "spf": {"status": spf_status, "details": spf_details, "source": "recorded_mta"},
+        "dkim": {"status": dkim_status, "details": dkim_details, "source": dkim_source},
+        "dmarc": {"status": dmarc_status, "policy": dmarc_policy, "details": dmarc_details, "source": "recorded_mta"},
     }

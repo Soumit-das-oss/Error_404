@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from app.core.constants import REGEX_URL, DANGEROUS_PAYLOAD_EXTENSIONS
+from app.services.detectors.brand_registry import check_brand_typosquatting
 
 DOMAIN_OR_URL_PATTERN = re.compile(
     r"^(?:https?://)?(?:www\.)?([a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z0-9][-a-zA-Z0-9]*)+)(?:[/:?#].*)?$",
@@ -99,7 +100,8 @@ def analyze_urls(
         for u in additional_urls:
             _add_url(u)
 
-    # 4. Inspect extracted URLs for Raw IP and Dangerous Payloads
+    # 4. Inspect extracted URLs for Raw IP, Dangerous Payloads, and Brand Typosquatting
+    typosquat_urls: List[Dict[str, Any]] = []
     for u in extracted_urls:
         try:
             parsed = urlparse(u)
@@ -117,6 +119,23 @@ def analyze_urls(
             if any(path.endswith(ext) for ext in DANGEROUS_PAYLOAD_EXTENSIONS):
                 if u not in suspicious_payload_urls:
                     suspicious_payload_urls.append(u)
+
+            # Check Brand Typosquatting / Impersonation
+            typo = check_brand_typosquatting(u)
+            if typo:
+                typo_entry = {
+                    "anchor_text": typo["matched_brand"],
+                    "actual_href": u,
+                    "display_domain": typo["matched_brand"],
+                    "target_domain": typo["target_domain"],
+                    "indicator": "TYPOSQUAT_BRAND_IMPERSONATION",
+                }
+                if typo_entry not in deceptive_urls:
+                    deceptive_urls.append(typo_entry)
+                typo_copy = dict(typo)
+                typo_copy["url"] = u
+                if typo_copy not in typosquat_urls:
+                    typosquat_urls.append(typo_copy)
         except Exception:
             continue
 
@@ -125,4 +144,5 @@ def analyze_urls(
         "deceptive_urls": deceptive_urls,
         "raw_ip_urls": raw_ip_urls,
         "suspicious_payload_urls": suspicious_payload_urls,
+        "typosquat_urls": typosquat_urls,
     }

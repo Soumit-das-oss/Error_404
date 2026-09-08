@@ -81,10 +81,17 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
     earliest_public_ip = str(case_intel.get("earliest_public_ip") or "None detected")
     llm_summary = str(case_intel.get("llm_summary") or case_intel.get("ai_summary") or "Forensic examination completed.")
 
-    risk = case_intel.get("risk", {})
+    risk = case_intel.get("risk", {}) if isinstance(case_intel.get("risk"), dict) else {}
     score = int(risk.get("score", case_intel.get("score", 0)))
     verdict = str(risk.get("verdict", case_intel.get("verdict", "SAFE"))).upper()
-    penalties = risk.get("penalties", case_intel.get("penalties", []))
+
+    raw_penalties = (
+        case_intel.get("itemized_penalties")
+        or risk.get("itemized_penalties")
+        or case_intel.get("penalties")
+        or risk.get("penalties")
+        or []
+    )
 
     auth = case_intel.get("auth", {})
     spf = auth.get("spf", {})
@@ -257,11 +264,11 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
     # 1. Header Line
     utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     hdr_left = Paragraph(
-        f"<b>VAJRA FORENSIC DOSSIER</b><br/><font size=7 color='#64748B'>CASE ID: {_pdf_sanitize(case_id)}</font>",
+        f"<b>VAJRA FORENSIC INTELLIGENCE DOSSIER | SIH26106</b><br/><font size=7 color='#64748B'>CASE ID: {_pdf_sanitize(case_id)}</font>",
         doc_title_style,
     )
     hdr_right = Paragraph(
-        f"Generated: {utc_now} UTC<br/>Problem Statement: SIH2026 - SHS0106",
+        f"Generated: {utc_now} UTC<br/>Problem Statement: SIH26106",
         meta_hdr_right,
     )
     hdr_table = Table([[hdr_left, hdr_right]], colWidths=[3.5 * inch, 3.5 * inch])
@@ -315,19 +322,50 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
         story.append(dlp_alert_table)
         story.append(Spacer(1, 4))
 
-    # 2. Verdict Banner
+    # 2. Verdict Banner with AI Forensic Engine Source Tag
+    ai_provider = str(case_intel.get("ai_provider") or "").lower()
+    if not ai_provider:
+        if "[Engine: Groq" in llm_summary:
+            ai_provider = "groq"
+        elif "[Engine: Local" in llm_summary or "ollama" in llm_summary.lower():
+            ai_provider = "ollama"
+        else:
+            ai_provider = "heuristic"
+
+    if ai_provider == "groq":
+        engine_label = "Groq Cloud LLM (Tier 1 Cloud Reasoning | llama-3.3-70b-versatile)"
+        engine_color = "#1D4ED8"
+    elif ai_provider == "ollama":
+        engine_label = "Local Air-Gapped LLM (Tier 2 Local Reasoning | llama3.2:1b)"
+        engine_color = "#0F766E"
+    else:
+        engine_label = "Deterministic Heuristic Engine (Tier 3 Offline Fallback)"
+        engine_color = "#475569"
+
+    banner_engine_style = ParagraphStyle(
+        "VajraBannerEngine",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=9,
+        textColor=colors.HexColor(engine_color),
+        alignment=0,
+    )
+    banner_engine_tag = Paragraph(f"AI FORENSIC ENGINE: {engine_label}", banner_engine_style)
+
     banner_score = Paragraph(
         f"<font color='{threat_color.hexval()}'><b>[ SCORE: {score} / 100 ] — {verdict_label}</b></font>",
         banner_score_style,
     )
-    banner_brief = Paragraph(_pdf_sanitize(llm_summary), banner_brief_style)
-    banner_table = Table([[banner_score], [banner_brief]], colWidths=[7.0 * inch])
+    sanitized_summary = _pdf_sanitize(llm_summary).replace("\n", "<br/>")
+    banner_brief = Paragraph(sanitized_summary, banner_brief_style)
+    banner_table = Table([[banner_score], [banner_engine_tag], [banner_brief]], colWidths=[7.0 * inch])
     banner_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), threat_bg),
         ("BOX", (0, 0), (-1, -1), 1.2, threat_color),
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, threat_color),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
         ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]))
@@ -361,8 +399,8 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
     story.append(Spacer(1, 6))
 
     # 4. Authentication Matrix Table
-    story.append(Paragraph("CRYPTOGRAPHIC &amp; DNS AUTHENTICATION MATRIX", section_heading_style))
-    def _auth_card(title: str, rfc: str, st: str, det: str) -> Paragraph:
+    story.append(Paragraph("CRYPTOGRAPHIC &amp; RECORDED HEADER AUTHENTICATION MATRIX", section_heading_style))
+    def _auth_card(title: str, rfc: str, st: str, det: str, src: str = "") -> Paragraph:
         st_u = st.upper()
         if st_u == "PASS":
             c_hex = "#16A34A"
@@ -372,8 +410,9 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
             c_hex = "#D97706"
         else:
             c_hex = "#64748B"
+        src_tag = f" <font size=6 color='#64748B'>[{_pdf_sanitize(src)}]</font>" if src else ""
         return Paragraph(
-            f"<b>{title}</b> <font size=6.5 color='#64748B'>({rfc})</font><br/>"
+            f"<b>{title}</b> <font size=6.5 color='#64748B'>({rfc})</font>{src_tag}<br/>"
             f"<font color='{c_hex}'><b>[{st_u}]</b></font><br/>"
             f"<font size=6.5 color='#475569'>{_pdf_sanitize(det)}</font>",
             td_left_style,
@@ -381,17 +420,20 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
 
     spf_st = str(spf.get("status", "NONE"))
     spf_dt = str(spf.get("details") or spf.get("record") or "No SPF details recorded")
+    spf_src = str(spf.get("source") or "")
     dkim_st = str(dkim.get("status", "NONE"))
     dkim_dt = str(dkim.get("details") or "No DKIM signature verified")
+    dkim_src = str(dkim.get("source") or "")
     dmarc_st = str(dmarc.get("status", "NONE"))
     dmarc_pol = str(dmarc.get("policy", "none"))
     dmarc_dt = str(dmarc.get("details") or f"Policy enforcement: {dmarc_pol}")
+    dmarc_src = str(dmarc.get("source") or "")
 
     auth_data = [
         [
-            _auth_card("SPF Verification", "RFC 7208", spf_st, spf_dt),
-            _auth_card("DKIM Signature", "RFC 6376", dkim_st, dkim_dt),
-            _auth_card("DMARC Enforcement", "RFC 7489", dmarc_st, dmarc_dt),
+            _auth_card("SPF Recorded Claim", "RFC 7208", spf_st, spf_dt, spf_src),
+            _auth_card("DKIM Signature", "RFC 6376", dkim_st, dkim_dt, dkim_src),
+            _auth_card("DMARC Evaluation", "RFC 7489", dmarc_st, dmarc_dt, dmarc_src),
         ]
     ]
     auth_table = Table(auth_data, colWidths=[2.3 * inch, 2.3 * inch, 2.4 * inch])
@@ -408,7 +450,7 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
     story.append(Spacer(1, 6))
 
     # 5. Reverse MTA Hop Traversal Table
-    story.append(Paragraph("REVERSE MTA HOP TRAVERSAL (ORIGIN PINPOINTING)", section_heading_style))
+    story.append(Paragraph("REVERSE MTA HOP TRAVERSAL (SENDING INFRASTRUCTURE GEOLOCATION)", section_heading_style))
     hop_col_widths = [0.5 * inch, 1.3 * inch, 1.8 * inch, 1.8 * inch, 0.8 * inch, 0.8 * inch]
     hop_headers = [
         Paragraph("Hop #", th_style),
@@ -461,21 +503,70 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
 
     # 6. Itemized Risk Deductions Table
     story.append(Paragraph("ITEMIZED THREAT DEDUCTIONS &amp; HEURISTICS", section_heading_style))
-    deduction_col_widths = [1.8 * inch, 0.8 * inch, 4.4 * inch]
+    deduction_col_widths = [2.2 * inch, 0.6 * inch, 4.2 * inch]
     deduction_headers = [
         Paragraph("Rule Code", th_style),
         Paragraph("Penalty", th_style),
         Paragraph("Forensic Justification", th_style),
     ]
     deduction_table_data = [deduction_headers]
-    if penalties:
-        for p in penalties:
-            r_rule = Paragraph(_pdf_sanitize(p.get("rule", "-")), penalty_rule_style)
-            r_pts = Paragraph(f"+{p.get('penalty', 0)}", penalty_pts_style)
-            r_reason = Paragraph(_pdf_sanitize(p.get("reason", "-")), penalty_reason_style)
+
+    def _extract_val(obj: Any, key: str, default: Any = None) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    normalized_penalties = []
+    for p in raw_penalties:
+        rule_val = _extract_val(p, "rule") or _extract_val(p, "rule_code") or "SECURITY_FLAG"
+        pts_raw = _extract_val(p, "penalty", 0)
+        try:
+            pts_val = int(pts_raw)
+        except (ValueError, TypeError):
+            pts_val = 0
+        reason_val = (
+            _extract_val(p, "justification")
+            or _extract_val(p, "reason")
+            or _extract_val(p, "description")
+            or "Suspicious pattern detected."
+        )
+        normalized_penalties.append({
+            "rule": str(rule_val),
+            "penalty": pts_val,
+            "reason": str(reason_val),
+        })
+
+    positive_penalties = [p for p in normalized_penalties if p["penalty"] > 0]
+    zero_penalties = [p for p in normalized_penalties if p["penalty"] == 0]
+
+    # If positive penalties exist (pts > 0), display all positive penalties.
+    # Omit benign zero-penalty informational rows (pts == 0) whenever active threat penalties (pts > 0) are present.
+    if positive_penalties:
+        display_penalties = positive_penalties
+    elif zero_penalties and score == 0:
+        display_penalties = zero_penalties
+    else:
+        display_penalties = []
+
+    if display_penalties:
+        for p in display_penalties:
+            rule_str = _pdf_sanitize(p["rule"])
+            pts_num = p["penalty"]
+            reason_str = _pdf_sanitize(p["reason"])
+            if pts_num > 0:
+                r_rule = Paragraph(f"<font color='#B91C1C'><b>{rule_str}</b></font>", penalty_rule_style)
+                r_pts = Paragraph(f"<b>+{pts_num}</b>", penalty_pts_style)
+            else:
+                r_rule = Paragraph(f"<font color='#16A34A'><b>{rule_str}</b></font>", penalty_rule_style)
+                r_pts = Paragraph("<b>+0</b>", penalty_pts_style)
+            r_reason = Paragraph(reason_str, penalty_reason_style)
             deduction_table_data.append([r_rule, r_pts, r_reason])
     else:
-        empty_p = Paragraph("<font color='#16A34A'><b>Clean Audit: Zero threat penalties triggered.</b></font>", td_center_style)
+        # Only render the fallback row "Clean Audit: Zero threat penalties triggered." when total score is 0 and there are strictly no positive penalties.
+        if score == 0 and not positive_penalties:
+            empty_p = Paragraph("<font color='#16A34A'><b>Clean Audit: Zero threat penalties triggered.</b></font>", td_center_style)
+        else:
+            empty_p = Paragraph(f"<font color='#DC2626'><b>Heuristic threat score ({score}/100) recorded from forensic indicators.</b></font>", td_center_style)
         deduction_table_data.append([empty_p, "", ""])
 
     deduction_table = Table(deduction_table_data, colWidths=deduction_col_widths)
@@ -488,7 +579,7 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]
-    if not penalties:
+    if not display_penalties:
         ded_style.append(("SPAN", (0, 1), (2, 1)))
         ded_style.append(("BACKGROUND", (0, 1), (-1, 1), WHITE))
     else:
@@ -536,12 +627,46 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
         att_table.setStyle(TableStyle(att_style))
         story.append(att_table)
 
-    # 8. Running Footer Callback
+    # 8. Forensic Methodology & Evidentiary Notice
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("FORENSIC METHODOLOGY &amp; EVIDENTIARY NOTICE", section_heading_style))
+    notice_p1 = Paragraph(
+        "<b>Offline-First Operational Design:</b> This forensic dossier was generated using an offline-first / air-gapped-capable "
+        "architecture with security-focused operational design and zero persistent disk writes.<br/>"
+        "<b>Authentication Telemetry:</b> Cryptographic DKIM signature verification was evaluated directly. SPF and DMARC "
+        "telemetry reflects recorded header authentication evaluation (audit of upstream MTA claims); live recursive DNS lookups "
+        "are reserved for connected environments.<br/>"
+        "<b>Infrastructure Geolocation:</b> Hop-resolved geographical coordinates and ASNs indicate the probable IP-based "
+        "geolocation of the observed sending infrastructure, not physical sender location.<br/>"
+        "<b>Data Privacy &amp; Ephemerality:</b> Active in-memory Data Loss Prevention (DLP) sanitizes payment cards, banking "
+        "details, contact numbers, and personal names prior to AI reasoning. Case storage in memory is intentionally ephemeral to preserve "
+        "zero-disk forensic hygiene; this cryptographic PDF dossier with SHA-256 evidence digest serves as the permanent evidentiary artifact.",
+        ParagraphStyle(
+            "VajraMethodologyNotice",
+            parent=styles["Normal"],
+            fontName="Helvetica",
+            fontSize=6.5,
+            leading=8.5,
+            textColor=colors.HexColor("#475569"),
+        )
+    )
+    notice_table = Table([[notice_p1]], colWidths=[7.0 * inch])
+    notice_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, SLATE_BORDER),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(notice_table)
+
+    # 9. Running Footer Callback
     def _add_running_footer(canvas, doc_obj):
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)
         canvas.setFillColor(colors.HexColor("#64748B"))
-        canvas.drawString(36, 18, "Certified Digital Forensic Dossier | VAJRA Forensic Platform (Air-Gapped Ingestion)")
+        canvas.drawString(36, 18, "Certified Digital Forensic Dossier | VAJRA Forensic Platform (Offline-First / Air-Gapped Capable | SIH26106)")
         canvas.drawRightString(A4[0] - 36, 18, f"Page {doc_obj.page}")
         canvas.setStrokeColor(SLATE_BORDER)
         canvas.setLineWidth(0.5)
