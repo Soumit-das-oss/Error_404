@@ -9,7 +9,7 @@ import SimpleView from './components/SimpleView';
 import AboutView from './components/AboutView';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('desktop'); 
+  const [activeTab, setActiveTab] = useState('desktop');
   const [scanData, setScanData] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
@@ -18,20 +18,20 @@ export default function App() {
     setIsScanning(true);
     setError(null);
     setScanData(null);
-    
-    await new Promise(resolve => setTimeout(resolve, 3500));
+
+    await new Promise(resolve => setTimeout(resolve, 8000));
 
     try {
       const response = await fetch('http://localhost:8000/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: payload.type, data: "..." }) 
+        body: JSON.stringify({ type: payload.type, data: "..." })
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const data = await response.json();
       setScanData(data);
     } catch (err) {
@@ -45,7 +45,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#050507] text-white font-sans selection:bg-amber-500/30 overflow-x-hidden relative">
       <VajraBackground />
-      
+
       {/* Error Toast Banner */}
       {error && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300 w-[90%] max-w-lg">

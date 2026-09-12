@@ -12,3 +12,75 @@
     @apply bg-slate-900 text-slate-100 font-sans;
   }
 }
+
+/* ---- Scanning stage stepper animations ---- */
+@keyframes stageIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes checkPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes dotBlink {
+
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes lineGrow {
+  from {
+    transform: scaleY(0);
+  }
+
+  to {
+    transform: scaleY(1);
+  }
+}
+
+.stage-row-enter {
+  animation: stageIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.stage-check-pop {
+  animation: checkPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.loading-dot {
+  animation: dotBlink 1.4s ease-in-out infinite both;
+}
+
+.stage-line-grow {
+  transform-origin: top;
+  animation: lineGrow 0.4s ease-out both;
+}

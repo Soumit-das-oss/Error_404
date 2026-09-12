@@ -7,7 +7,7 @@ export default function AboutView() {
         <h2 className="text-2xl sm:text-3xl font-black tracking-wide text-white mb-4">
           VAJRA: Next-Generation Threat Intelligence
         </h2>
-        
+
         <p className="text-zinc-400 text-sm sm:text-base leading-relaxed mb-8">
           VAJRA is an environment-agnostic forensic tool designed to unmask sophisticated email threats, psychological manipulation, and hidden payloads. It bridges the gap between deep forensic analysis and actionable insights.
         </p>
