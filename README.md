@@ -15,7 +15,7 @@ Sophisticated email threats have evolved far beyond simple spam. Modern bad acto
 
 VAJRA (translating to *divine thunderbolt/diamond*) is an environment-agnostic forensic weapon designed to tear through obfuscation. We bridge the gap between heavy technical data and simple usability.
 
-- **Elite UI/UX Architecture**: A stunning, ultra-premium glassmorphic interface set against an ambient, procedurally generated electric storm canvas. 
+- **Elite UI/UX Architecture**: A stunning, ultra-premium glassmorphic interface set against an ambient, procedurally generated electric storm canvas, featuring a custom 3-phase cyber-defense activation animation.
 - **Dynamic Input Systems**: Distinct user flows tailored to the context—upload raw `.eml` files on Desktop, or paste raw text/images on Mobile.
 - **Multimodal Scanning & NLP Analysis**: Built to translate raw cryptographic metadata and psychological intent into plain-English, actionable intelligence.
 

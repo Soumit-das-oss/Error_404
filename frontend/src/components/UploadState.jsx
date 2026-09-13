@@ -120,7 +120,7 @@ export default function UploadState({ activeTab, onScan }) {
                 if (e.target.files && e.target.files[0]) setSelectedFile(e.target.files[0]);
               }} />
               <FileImage className="w-4 h-4 text-cyan-400" />
-              <span className="font-bold tracking-wider truncate px-2">{selectedFile ? selectedFile.name : "Attach the files if presented in email"}</span>
+              <span className="font-bold tracking-wider truncate px-2">{selectedFile ? selectedFile.name : "Upload Email Attachments (Optional)"}</span>
             </label>
           </div>
         )}
