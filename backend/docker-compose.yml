@@ -1,0 +1,16 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vajra-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - LLM_MODEL=llama-3.1-8b-instant
+      - OLLAMA_URL=http://host.docker.internal:11434/api/generate
+      - OLLAMA_MODEL=llama3.2:1b
+    volumes:
+      - ./data:/app/data

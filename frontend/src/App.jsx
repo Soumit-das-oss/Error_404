@@ -8,6 +8,7 @@ import TechnicalView from './components/TechnicalView';
 import SimpleView from './components/SimpleView';
 import AboutView from './components/AboutView';
 import HeroIntro from './components/HeroIntro';
+import { normalizeScanData } from './utils/normalizeScanData';
 
 export default function App() {
   const [introFinished, setIntroFinished] = useState(false);
@@ -21,24 +22,46 @@ export default function App() {
     setError(null);
     setScanData(null);
 
-    await new Promise(resolve => setTimeout(resolve, 8000));
+    // Keep a minimum smooth animation window (2.8s) so the user experiences the forensic scan
+    const minDelayPromise = new Promise(resolve => setTimeout(resolve, 2800));
 
     try {
-      const response = await fetch('http://localhost:8000/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: payload.type, data: "..." })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      let response;
+      if (payload.type === 'file') {
+        const formData = new FormData();
+        formData.append('file', payload.data);
+        response = await fetch('http://localhost:8000/api/scan', {
+          method: 'POST',
+          body: formData,
+        });
+      } else {
+        response = await fetch('http://localhost:8000/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raw_email: payload.data }),
+        });
       }
 
-      const data = await response.json();
-      setScanData(data);
+      if (!response.ok) {
+        let errMsg = `Forensic Engine returned HTTP ${response.status}`;
+        try {
+          const errJson = await response.json();
+          errMsg = errJson.error?.message || errJson.detail || errMsg;
+        } catch {
+          // ignore json parse failure
+        }
+        throw new Error(errMsg);
+      }
+
+      const rawData = await response.json();
+      const normalized = normalizeScanData(rawData);
+
+      // Await minimum scan timer to ensure smooth visual transition
+      await minDelayPromise;
+      setScanData(normalized);
     } catch (err) {
-      console.error(err);
-      setError("Connection Refused: Target backend [localhost:8000] is offline.");
+      console.error('Forensic Scan Failure:', err);
+      setError(err.message || 'Target forensic backend [localhost:8000] is unavailable.');
     } finally {
       setIsScanning(false);
     }
