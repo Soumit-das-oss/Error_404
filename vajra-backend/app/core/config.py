@@ -16,8 +16,8 @@ class Settings(BaseSettings):
 
     # AI Integration Settings
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
-    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    LLM_MODEL: str = "openai/gpt-oss-20b"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_URL: str = "http://localhost:11434/api/generate"
     OLLAMA_MODEL: str = "llama3.2:1b"
