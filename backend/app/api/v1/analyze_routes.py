@@ -237,10 +237,6 @@ async def execute_forensic_pipeline(parsed: Dict[str, Any], dlp_masking: bool = 
         "verdict": risk_result["verdict"],
         "quishing_detected": quishing_detected,
         "llm_summary": ai_result["summary"],
-        "threat_report": ai_result.get("threat_report"),
-        "tldr": ai_result.get("threat_report", {}).get("tldr") if isinstance(ai_result.get("threat_report"), dict) else None,
-        "red_flags": ai_result.get("threat_report", {}).get("red_flags") if isinstance(ai_result.get("threat_report"), dict) else [],
-        "action": ai_result.get("threat_report", {}).get("action") if isinstance(ai_result.get("threat_report"), dict) else None,
         "ai_provider": ai_provider,
         "dlp_security": ai_result.get("dlp_security", {
             "status": "ACTIVE" if dlp_masking else "BYPASSED",
@@ -447,9 +443,6 @@ async def analyze_raw_email(
                 if isinstance(body_json, dict):
                     if "raw_email" in body_json:
                         email_str = str(body_json["raw_email"] or "")
-                        raw_bytes = email_str.encode("utf-8", errors="ignore")
-                    elif "data" in body_json and isinstance(body_json["data"], str):
-                        email_str = str(body_json["data"] or "")
                         raw_bytes = email_str.encode("utf-8", errors="ignore")
                     elif "headers" in body_json:
                         headers = str(body_json.get("headers") or "").strip()

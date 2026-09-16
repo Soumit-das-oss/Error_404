@@ -14,11 +14,15 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
 
-    # AI Integration Settings (Groq Cloud API)
+    # AI Integration Settings
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "llama3-70b-8192"
-    LLM_MODEL: str = "llama3-70b-8192"
-    GROQ_TIMEOUT_SECONDS: float = 10.0
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    LLM_MODEL: str = "openai/gpt-oss-20b"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_URL: str = "http://localhost:11434/api/generate"
+    OLLAMA_MODEL: str = "llama3.2:1b"
+    GROQ_TIMEOUT_SECONDS: float = 4.0
+    OLLAMA_TIMEOUT_SECONDS: float = 15.0
 
     # 25 MB Payload Limit (25 * 1024 * 1024 bytes)
     MAX_PAYLOAD_BYTES: int = 26214400

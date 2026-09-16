@@ -8,4 +8,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    allowedHosts: true, // Allows trycloudflare.com domains
+    // OR specifically: allowedHosts: ['.trycloudflare.com']
+  }
 })

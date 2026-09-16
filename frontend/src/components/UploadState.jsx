@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react';
-import { UploadCloud, FileText, Scan, FileImage, X, CheckCircle2, Shield } from 'lucide-react';
+import { UploadCloud, FileText, Scan, FileImage, X, CheckCircle2, Shield, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 export default function UploadState({ activeTab, onScan }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [textContent, setTextContent] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [dlpMasking, setDlpMasking] = useState(true);
   const fileInputRef = useRef(null);
 
   const handleDrag = (e) => {
@@ -36,9 +37,9 @@ export default function UploadState({ activeTab, onScan }) {
 
   const handleScanClick = () => {
     if (activeTab === 'desktop' && selectedFile) {
-      onScan({ type: 'file', data: selectedFile });
+      onScan({ type: 'desktop', data: selectedFile, dlpMasking });
     } else if (activeTab === 'mobile' && textContent.trim()) {
-      onScan({ type: 'text', data: textContent });
+      onScan({ type: 'mobile', data: textContent, attachment: selectedFile, dlpMasking });
     }
   };
 
@@ -124,6 +125,54 @@ export default function UploadState({ activeTab, onScan }) {
             </label>
           </div>
         )}
+      </div>
+      
+      {/* DLP PII Masking Toggle Switch */}
+      <div className="bg-[#0f111a] backdrop-blur-xl border border-slate-700/80 hover:border-cyan-500/40 rounded-2xl p-3.5 sm:p-4 shadow-[0_0_20px_rgba(0,0,0,0.8)] transition-all duration-300">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 transition-colors ${
+              dlpMasking
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.2)]'
+            }`}>
+              {dlpMasking ? <ShieldCheck className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-bold text-slate-100 tracking-wide">DLP PII Masking</span>
+                <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                  dlpMasking
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    : 'bg-rose-500/15 text-rose-400 border-rose-500/30 animate-pulse'
+                }`}>
+                  {dlpMasking ? 'Active' : 'Bypassed'}
+                </span>
+              </div>
+              <p className="text-[10px] sm:text-xs text-zinc-400 mt-0.5 leading-relaxed">
+                {dlpMasking
+                  ? 'Redacts cards, IBANs, phone numbers & PII in-memory before AI reasoning'
+                  : 'Warning: Raw text & PII exposed to AI unmasked. Compliance liability disclaimed.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={dlpMasking}
+            onClick={() => setDlpMasking(!dlpMasking)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+              dlpMasking ? 'bg-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.5)]' : 'bg-zinc-800'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
+                dlpMasking ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
       </div>
 
       <button 

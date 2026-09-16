@@ -1,52 +1,90 @@
-# 🛠️ VAJRA Development Logs
-
-This document serves as a chronological record of architectural decisions, UI/UX overhauls, and engineering milestones achieved during the development of the VAJRA Frontend Prototype.
+# 🛡️ VAJRA Forensic Platform — Architecture & Engineering Specifications
+> **Smart India Hackathon (SIH 2026) | Problem Statement: SIH26106**  
+> **Offline-First / Air-Gapped Zero-Database Forensic Email Intelligence Platform**
 
 ---
 
-## [Phase 1] Project Initialization & Restructuring
-**Objective:** Move away from static HTML/JS and establish a modern, scalable React architecture.
-- **Environment**: Initialized a Vite + React environment.
-- **Styling Engine**: Integrated Tailwind CSS (v4 architecture) and Lucide-react for iconography.
-- **Directory Structure**: Completely decoupled the monolithic structure into dedicated `frontend/` and `backend/` directories at the project root to prepare for future API integration.
+## 🏛️ System Architecture Overview
 
-## [Phase 2] Component Modularization & State Machine
-**Objective:** Refactor the UI into distinct, maintainable React components controlled by a central state machine.
-- **State Orchestrator (`App.jsx`)**: Engineered a strict global state managing `activeTab`, `scanData`, `isScanning`, and `error` states. 
-- **Dynamic Routing**: Built the flow to strictly enforce paths: Input -> Loading Animation -> Result View (Technical or Simple).
-- **Data Isolation**: Removed hardcoded mock data from initial renders, ensuring data is only injected post-scan.
+```mermaid
+flowchart TD
+    subgraph Ingestion["Dual Ingestion Interface"]
+        UI_Desktop["Desktop Interface<br/>(RFC 5322 .eml / .msg Upload)"] -->|POST /api/v1/upload| API_Upload["Upload Route<br/>(analyze_routes.py)"]
+        UI_Mobile["Mobile / Stream Interface<br/>(Raw Text Headers + Body)"] -->|POST /api/v1/raw| API_Raw["Raw Stream Route<br/>(analyze_routes.py)"]
+    end
 
-## [Phase 3] Input Mechanics & Validation
-**Objective:** Build specialized, context-aware input methods.
-- **Desktop Flow (`UploadState.jsx`)**: Implemented a large drag-and-drop zone specifically engineered to accept and validate `.eml`, `.msg`, and `.txt` files using native React `onDrag` and `onDrop` event handlers.
-- **Mobile Flow**: Deployed a raw `<textarea>` input coupled with a secondary PDF/QR upload button.
-- **Validation**: Wired the "Initiate Scan" button to disable dynamically if required inputs are missing.
+    subgraph ForensicCore["Air-Gapped In-Memory Forensic Pipeline"]
+        API_Upload --> Pipeline["Forensic Engine Pipeline"]
+        API_Raw --> Pipeline
 
-## [Phase 4] Mobile Responsiveness & Polish
-**Objective:** Guarantee a flawless experience across all device form factors.
-- **Fluid Layouts**: Applied extensive Tailwind `sm:`, `md:`, and `lg:` breakpoints. 
-- **Trace Map Scrolling**: Refactored the IP routing trace map inside `TechnicalView.jsx` to utilize native `snap-x` horizontal scrolling, preventing horizontal viewport bleed on iPhones.
-- **Micro-Typography**: Implemented aggressive truncation, `break-all` bounds, and dynamic text scaling for all cryptographic hashes and raw header outputs.
+        Pipeline --> Parser["MIME / RFC 5322 Bytes Parser<br/>(Zero Disk Writes)"]
+        Parser --> Hops["Reverse MTA Hop Traversal<br/>& MaxMind GeoLite2 ASN/City Resolution"]
+        Parser --> Auth["Tripartite Cryptographic Audit<br/>(SPF, DKIM, DMARC Evaluation)"]
+        Parser --> Payloads["Deep Payload Extractors<br/>- PDF Javascript & Launch Actions<br/>- QR Code Quishing Detection<br/>- Deceptive Hyperlink Analyzer"]
+        Parser --> Text["Social Engineering & Typosquatting<br/>(Brand Registry & Coercion Rules)"]
 
-## [Phase 5] Cyberpunk Aesthetic Overhaul
-**Objective:** Discard the generic theme in favor of a sleek, cyberpunk-inspired cybersecurity identity.
-- **Color Palette**: Shifted the entire application to a pure black (`#000000`) background with vibrant `cyan` and `purple` accents.
-- **Ultra-Premium Glassmorphism**: Engineered complex composite Tailwind classes for all foreground cards (`bg-zinc-950/60 backdrop-blur-xl`). Added refractive inner highlights (`inset_0_1px_0`) and deep ambient outer shadows (`0_8px_32px`) to simulate thick frosted glass.
-- **About View**: Created a new heavily glassmorphic `AboutView.jsx` tab detailing VAJRA's core features (Multimodal Scanning, NLP Analysis, IP Traceback).
+        Hops --> Scorer["Deterministic Heuristic Scorer<br/>(0–100 Weighted Risk Matrix)"]
+        Auth --> Scorer
+        Payloads --> Scorer
+        Text --> Scorer
+    end
 
-## [Phase 6] Custom HTML5 Canvas Particle System
-**Objective:** Build a performant, dependency-free background effect that creates a deep technological atmosphere.
-- **`VajraBackground.jsx`**: Built a pure HTML5 `<canvas>` animation using a `requestAnimationFrame` loop.
-- **Particle Dynamics**: Engineered a custom `Particle` class that renders slowly drifting cyan and purple orbs.
-- **Ambient Movement**: Particles drift seamlessly across the screen with wrap-around boundaries, creating a calm, immersive backdrop.
+    subgraph Intelligence["DLP Shield & AI Explainer"]
+        Scorer --> DLP["In-Memory DLP Masking Shield<br/>(Credit Cards, IBANs, Phones, Names)"]
+        DLP --> AI["3-Tier AI Failover Orchestrator<br/>Tier 1: Groq Cloud (llama-3.3-70b / gpt-oss)<br/>Tier 2: Local Ollama (air-gapped llama3)<br/>Tier 3: Heuristic Evidence Synthesizer"]
+    end
 
-## [Phase 7] Backend Simulation & Error Handling
-**Objective:** Provide a seamless demo experience for Hackathon evaluators before the actual backend API is live.
-- **The Engine Spin-Up**: Implemented a forced 3.5-second `setTimeout` during scans.
-- **Terminal Animation (`ScanningLoader.jsx`)**: Built a loader that cycles through elite "hacker-style" forensic steps (e.g., "Parsing RFC-822 Headers...") every 800ms.
-- **Graceful Failure**: Wired the pipeline to attempt a `fetch()` to `localhost:8000`. Upon inevitable failure (since the backend is offline), the UI gracefully catches the error and mounts a sleek, Crimson-colored slide-in Toast banner alerting the user to the "Connection Refused" status.
+    subgraph Persistence["Zero-Database Ephemeral Case Store"]
+        AI --> RAMStore["Thread-Safe RAM FIFO Case Store<br/>(Capacity: 25 Cases in RAM)"]
+    end
 
-## [Phase 8] Advanced Motion Design & UI Polish
-**Objective:** Elevate the first impression and refine microcopy for enterprise-grade professionalism.
-- **Cyber-Defense Shield Animation**: Rewrote the `<HeroIntro />` component to use a synchronized 3-phase activation sequence (`coreIgnite`, `wingSweep`, `outlinePulse`) perfectly timed to `1.8s`, abandoning generic glide-in effects.
-- **Enterprise Microcopy**: Updated the secondary file attachment label in `UploadState.jsx` to "Upload Email Attachments (Optional)" for cleaner, more professional communication.
+    subgraph Delivery["SOC Presentation & Permanent Artifacts"]
+        RAMStore --> SOC["SOC Investigation Dashboard<br/>(GET /api/v1/cases)"]
+        RAMStore --> Report["Detailed Forensic Dossier<br/>(GET /api/v1/cases/{case_id})"]
+        RAMStore --> PDF["Certified ReportLab Platypus PDF<br/>(GET /api/v1/cases/{case_id}/pdf)"]
+    end
+```
+
+---
+
+## 📋 Engineering Milestones & Changelog
+
+### Phase 1: Core Architecture & In-Memory Foundation
+- Decoupled into `frontend/` (React + Vite + Tailwind CSS) and `backend/` (FastAPI + Python 3.10+).
+- Enforced zero-database hygiene: all email payloads, parsed structures, attachments, and cases live strictly in volatile memory.
+
+### Phase 2: Reverse MTA Hop Traversal & Geolocation
+- Engineered reverse hop parser traversing `Received` headers from internal targets back to origin MTA.
+- Integrated MaxMind `GeoLite2-City` and `GeoLite2-ASN` MMDB readers with Tor exit-node cache lookup.
+
+### Phase 3: Cryptographic & DNS Authentication Engine
+- Audit of upstream MTA claims (`Authentication-Results`, `Received-SPF`, `DKIM-Signature`).
+- Independent verification engine for SPF DNS TXT queries, DKIM cryptographic signature validation, and DMARC policy enforcement.
+
+### Phase 4: Multimodal In-Memory Payload Detonation
+- **PDF Engine**: In-memory inspection of PDF streams for `/JavaScript`, `/Launch`, embedded URLs, and embedded images.
+- **QR Engine (Quishing)**: Automatic extraction and OpenCV decoding of embedded QR codes to unmask phishing redirectors.
+- **Deceptive Hyperlink Engine**: Detection of visual anchor text mimicking legitimate brands while `href` targets malicious domains.
+
+### Phase 5: Deterministic Scoring & Brand Registry
+- 0–100 risk scoring matrix with itemized penalties and transparent threat verdict tiers (`SAFE`, `SUSPICIOUS`, `MALICIOUS`).
+- Levenshtein-distance typosquatting detector cross-referencing high-value targets (PayPal, Microsoft, Google, banks).
+
+### Phase 6: Privacy-Preserving DLP Shield & 3-Tier AI Failover
+- Local regex-based PII redactor anonymizing credit cards, IBANs, phone numbers, and names prior to LLM reasoning.
+- 3-tier automatic failover orchestrator:
+  1. Groq Cloud Ultra-Low Latency Inference.
+  2. Local Ollama LLM endpoint (for air-gapped deployments).
+  3. Deterministic heuristic evidence synthesizer fallback.
+
+### Phase 7: Certified PDF Dossier Generator
+- ReportLab Platypus digital forensic dossier generation streamed directly from memory buffer (`BytesIO`).
+- Generates executive summaries, MTA hop routing tables, cryptographic signature proofs, and SHA-256 evidence integrity hashes.
+
+### Phase 8: SOC Investigation Dashboard & Dual-Mode Ingestion
+- Real-time SOC investigation dashboard querying active in-memory cases (`GET /api/v1/cases`).
+- Responsive table with sorting, search, verdict filters, and one-click PDF exports.
+- Dual ingestion routing:
+  - **Desktop View**: RFC 5322 `.eml` / `.msg` file upload (`POST /api/v1/upload`).
+  - **Mobile View**: Raw email MIME headers and plain text streaming (`POST /api/v1/raw`).
+- Replaced all non-functional dummy quarantine buttons with actionable read-only SOC gateway advisories.

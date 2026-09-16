@@ -1,4 +1,10 @@
-import { AlertTriangle, Shield, KeyRound, Lock, Terminal, Globe, Network, Code2, ArrowRight, Ban, Share2, Download, CheckCircle2, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { 
+  AlertTriangle, Shield, KeyRound, Lock, Terminal, Globe, Network, 
+  Code2, ArrowRight, Download, CheckCircle2, XCircle, AlertCircle,
+  ArrowLeft, Copy, Check, ShieldCheck, ShieldAlert, Loader2
+} from 'lucide-react';
+import { downloadCasePdf } from '../utils/pdfExport';
 
 const RiskGauge = ({ score }) => {
   const radius = 40;
@@ -48,40 +54,163 @@ function AuthCard({ title, icon, data }) {
   );
 }
 
-export default function TechnicalView({ data }) {
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 w-full animate-in fade-in duration-500 pb-10">
-      
-      {/* LEFT COLUMN */}
-      <div className="lg:col-span-4 flex flex-col gap-4 sm:gap-6">
-        
-        {/* Risk Score Card */}
-        <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl p-5 sm:p-6 shadow-xl hover:border-rose-500/40 transition-colors duration-300 flex flex-col items-center">
-          <RiskGauge score={data.score} />
-          
-          <div className="mt-4 sm:mt-6 flex flex-col items-center text-center">
-            <div className="flex items-center gap-1.5 sm:gap-2 bg-rose-500/10 border border-rose-500/20 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full mb-2">
-              <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500" />
-              <span className="text-rose-500 font-bold text-xs sm:text-sm tracking-wide">{data.status}</span>
-            </div>
-            <p className="text-zinc-400 text-[11px] sm:text-xs font-medium px-2">{data.subStatus}</p>
-          </div>
+export default function TechnicalView({ data, onBack }) {
+  const [isExporting, setIsExporting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-          <div className="grid grid-cols-3 gap-2 sm:gap-3 w-full mt-6 sm:mt-8">
-            <button className="flex flex-col items-center justify-center gap-1.5 p-2 sm:p-3 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-400 hover:text-rose-400 transition-colors group">
-              <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4 group-hover:scale-110 transition-transform" />
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Block</span>
+  const isDlpActive = data.dlp_security?.masking_active !== false && data.dlp_masking !== false;
+
+  const handleExport = async () => {
+    if (!data.case_id) {
+      alert('No Case ID available for certified PDF export.');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      await downloadCasePdf(data.case_id);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert(err.message || 'Failed to download PDF report');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleCopyCaseId = () => {
+    if (data.case_id) {
+      navigator.clipboard.writeText(data.case_id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4 sm:gap-6 w-full animate-in fade-in duration-500 pb-10">
+      
+      {/* CASE DOSSIER TOP ACTION BAR */}
+      <div className="bg-[#0f111a] backdrop-blur-xl border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-[0_0_20px_rgba(0,0,0,0.8)] flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700/60 transition-colors text-xs font-bold uppercase tracking-wider w-fit"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to SOC</span>
             </button>
-            <button className="flex flex-col items-center justify-center gap-1.5 p-2 sm:p-3 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-zinc-500/50 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors group">
-              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 group-hover:scale-110 transition-transform" />
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Export</span>
+          )}
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] sm:text-xs font-bold text-zinc-500 uppercase tracking-widest">Case Dossier:</span>
+            <button
+              onClick={handleCopyCaseId}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-950 border border-zinc-800 hover:border-cyan-500/40 text-cyan-400 font-mono text-xs font-bold transition-colors group"
+              title="Click to copy Case ID"
+            >
+              <span>{data.case_id || 'CAS-IN-MEMORY'}</span>
+              {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-zinc-500 group-hover:text-cyan-300" />}
             </button>
-            <button className="flex flex-col items-center justify-center gap-1.5 p-2 sm:p-3 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-amber-500/50 hover:bg-amber-500/10 text-zinc-400 hover:text-amber-400 transition-colors group">
-              <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 group-hover:scale-110 transition-transform" />
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">Escalate</span>
-            </button>
+
+            {/* DLP Status Badge */}
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider ${
+              isDlpActive
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+            }`}>
+              {isDlpActive ? <ShieldCheck className="w-3 h-3 text-emerald-400" /> : <ShieldAlert className="w-3 h-3 text-rose-400" />}
+              <span>{isDlpActive ? 'DLP Masked' : 'DLP Bypassed'}</span>
+            </div>
           </div>
         </div>
+
+        {/* PRIMARY CERTIFIED REPORT PDF EXPORT BUTTON */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExport}
+            disabled={isExporting}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold uppercase tracking-wider transition-all duration-300 shadow-lg ${
+              isExporting
+                ? 'bg-zinc-800 text-zinc-400 cursor-wait'
+                : 'bg-gradient-to-r from-cyan-950 via-slate-900 to-cyan-900 border border-cyan-500/50 text-cyan-300 hover:text-white hover:border-cyan-400 hover:shadow-[0_0_20px_rgba(34,211,238,0.25)] hover:scale-[1.02]'
+            }`}
+          >
+            {isExporting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                <span>Generating Platypus PDF...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 text-cyan-400" />
+                <span>Export Certified Report</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 w-full">
+        
+        {/* LEFT COLUMN */}
+        <div className="lg:col-span-4 flex flex-col gap-4 sm:gap-6">
+          
+          {/* Risk Score Card */}
+          <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl p-5 sm:p-6 shadow-xl hover:border-rose-500/40 transition-colors duration-300 flex flex-col items-center">
+            <RiskGauge score={data.score} />
+            
+            <div className="mt-4 sm:mt-6 flex flex-col items-center text-center">
+              <div className="flex items-center gap-1.5 sm:gap-2 bg-rose-500/10 border border-rose-500/20 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full mb-2">
+                <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500" />
+                <span className="text-rose-500 font-bold text-xs sm:text-sm tracking-wide">{data.status}</span>
+              </div>
+              <p className="text-zinc-400 text-[11px] sm:text-xs font-medium px-2">{data.subStatus}</p>
+            </div>
+
+            {/* Quick Actions & Static SOC Advisory (Read-Only) */}
+            <div className="w-full mt-6 sm:mt-8 flex flex-col gap-3">
+              <button 
+                onClick={handleExport}
+                disabled={isExporting}
+                className="w-full flex items-center justify-center gap-2 p-3 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-cyan-500/50 hover:bg-cyan-500/10 text-zinc-300 hover:text-cyan-300 font-bold text-xs uppercase tracking-wider transition-all group"
+              >
+                {isExporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                ) : (
+                  <Download className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+                )}
+                <span>{isExporting ? 'Generating Dossier...' : 'Download Certified PDF Dossier'}</span>
+              </button>
+
+              {/* Static Read-Only SOC Advisory Callout */}
+              <div className={`p-3 rounded-xl border flex items-start gap-2.5 text-left text-xs ${
+                data.score >= 60 
+                  ? 'bg-rose-950/40 border-rose-500/40 text-rose-300' 
+                  : data.score >= 20 
+                  ? 'bg-amber-950/40 border-amber-500/40 text-amber-300' 
+                  : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+              }`}>
+                {data.score >= 60 ? (
+                  <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                ) : data.score >= 20 ? (
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider block text-zinc-400 mb-0.5">
+                    Recommended SOC Action
+                  </span>
+                  <p className="text-[11px] leading-relaxed font-medium">
+                    {data.score >= 60 
+                      ? 'Quarantine via Corporate Mail Gateway / Boundary Firewall. Null-route origin IP.'
+                      : data.score >= 20 
+                      ? 'Sandbox inspection recommended. Enforce secondary boundary gateway verification.'
+                      : 'Clean transmission verified. Standard mail delivery authorized by perimeter policy.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
 
         {/* Threat Indicators */}
         <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl p-5 sm:p-6 shadow-xl hover:border-cyan-500/40 transition-colors duration-300">
@@ -189,5 +318,6 @@ export default function TechnicalView({ data }) {
 
       </div>
     </div>
+  </div>
   );
 }

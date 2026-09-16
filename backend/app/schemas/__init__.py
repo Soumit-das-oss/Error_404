@@ -15,7 +15,6 @@ from app.schemas.analysis import (
     CaseResponseDTO,
     PaginatedCasesResponse,
     DlpOption,
-    ThreatAnalysisReport,
 )
 
 __all__ = [
@@ -35,6 +34,5 @@ __all__ = [
     "CaseResponseDTO",
     "PaginatedCasesResponse",
     "DlpOption",
-    "ThreatAnalysisReport",
 ]
 

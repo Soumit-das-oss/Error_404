@@ -9,13 +9,6 @@ class DlpOption(str, Enum):
     FALSE = "false"
 
 
-class ThreatAnalysisReport(BaseModel):
-    verdict: str  # Must be "SAFE", "SUSPICIOUS", or "MALICIOUS"
-    tldr: str     # A one-sentence executive summary
-    red_flags: List[str]  # Array of 2-3 specific technical dangers
-    action: str   # One actionable sentence for the user
-
-
 class HopDTO(BaseModel):
     """Forensic Mail Transfer Agent (MTA) Hop Information."""
     hop_number: int = Field(..., description="1-indexed chronological hop index (1 = earliest entry MTA)")
@@ -233,10 +226,6 @@ class CaseResponseDTO(BaseModel):
         ),
         description="Data Loss Prevention compliance audit and liability status",
     )
-    threat_report: Optional[ThreatAnalysisReport] = Field(None, description="Groq AI Threat Analysis Report")
-    tldr: Optional[str] = Field(None, description="One-sentence executive threat summary")
-    red_flags: List[str] = Field(default_factory=list, description="List of technical threat indicators")
-    action: Optional[str] = Field(None, description="Recommended user action")
     created_at: Optional[datetime] = Field(None, description="Case timestamp in UTC")
 
     model_config = ConfigDict(from_attributes=True)
@@ -245,13 +234,6 @@ class CaseResponseDTO(BaseModel):
     def sync_verdict(self) -> "CaseResponseDTO":
         if self.verdict is None and self.risk:
             self.verdict = self.risk.verdict
-        if self.threat_report:
-            if not self.tldr:
-                self.tldr = self.threat_report.tldr
-            if not self.red_flags:
-                self.red_flags = self.threat_report.red_flags
-            if not self.action:
-                self.action = self.threat_report.action
         return self
 
 

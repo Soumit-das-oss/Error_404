@@ -8,6 +8,8 @@ import io
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
+from app.core.config import settings
+
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
@@ -333,7 +335,8 @@ def generate_case_pdf(case_data: Dict[str, Any]) -> bytes:
             ai_provider = "heuristic"
 
     if ai_provider == "groq":
-        engine_label = "Groq Cloud LLM (Tier 1 Cloud Reasoning | llama-3.3-70b-versatile)"
+        groq_model = getattr(settings, "GROQ_MODEL", "openai/gpt-oss-20b")
+        engine_label = f"Groq Cloud LLM (Tier 1 Cloud Reasoning | {groq_model})"
         engine_color = "#1D4ED8"
     elif ai_provider == "ollama":
         engine_label = "Local Air-Gapped LLM (Tier 2 Local Reasoning | llama3.2:1b)"

@@ -8,7 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
-from fastapi import FastAPI, Request, status, HTTPException
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -18,8 +18,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import settings
 from app.storage.memory_store import case_store
 from app.api.v1.router import router as api_v1_router
-from app.schemas.analysis import ThreatAnalysisReport, CaseResponseDTO
-from app.services.ai.groq_provider import analyze_threat_with_groq_async
 
 # Configure platform-wide logging
 logging.basicConfig(
@@ -84,7 +82,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def default_dlp_query_param(request: Request, call_next):
         path = request.url.path
-        if path in ("/api/scan", "/api/v1/raw", "/api/v1/upload", "/api/v1/analyze/raw", "/api/v1/analyze/upload"):
+        if path in ("/api/v1/raw", "/api/v1/upload", "/api/v1/analyze/raw", "/api/v1/analyze/upload"):
             if "dlp_masking" not in request.query_params:
                 qs = request.scope.get("query_string", b"").decode("latin-1")
                 new_qs = f"{qs}&dlp_masking=true" if qs else "dlp_masking=true"
@@ -93,73 +91,6 @@ def create_app() -> FastAPI:
 
     # Mount API v1 Routes
     app.include_router(api_v1_router, prefix=settings.API_V1_STR)
-
-    # Unified Forensic Analysis Endpoint: /api/scan
-    @app.post(
-        "/api/scan",
-        response_model=CaseResponseDTO,
-        tags=["Forensic Threat Analysis"],
-        summary="Unified Forensic Scan & Threat Analysis",
-        description="Comprehensive email analysis executing full forensic pipeline with Groq AI Threat Analysis Report.",
-    )
-    async def scan_email_endpoint(request: Request):
-        from app.parsers.eml_parser import parse_eml_bytes
-        from app.parsers.msg_parser import parse_msg_bytes
-        from app.api.v1.analyze_routes import execute_forensic_pipeline
-        from app.storage.memory_store import save_case
-        from app.schemas.analysis import CaseResponseDTO
-
-        content_type = request.headers.get("content-type", "").lower()
-        raw_bytes = b""
-
-        if "multipart/form-data" in content_type:
-            form = await request.form()
-            file = form.get("file")
-            if file and hasattr(file, "read"):
-                f_bytes = await file.read()
-                filename = (getattr(file, "filename", "") or "").lower()
-                if filename.endswith(".msg"):
-                    try:
-                        parsed = parse_msg_bytes(f_bytes)
-                    except Exception as e:
-                        raise HTTPException(
-                            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            detail=f"Failed to parse Outlook .msg file: {e}",
-                        )
-                else:
-                    parsed = parse_eml_bytes(f_bytes)
-                case_data = await execute_forensic_pipeline(parsed, dlp_masking=True)
-                saved = save_case(case_data)
-                return CaseResponseDTO.model_validate(saved)
-
-            raw_text = form.get("raw_email") or form.get("data") or form.get("text") or ""
-            if hasattr(raw_text, "read"):
-                raw_bytes = await raw_text.read()
-            else:
-                raw_bytes = str(raw_text).encode("utf-8", errors="ignore")
-        elif "application/json" in content_type:
-            try:
-                body = await request.json()
-            except Exception:
-                body = {}
-            if isinstance(body, dict):
-                raw_text = body.get("raw_email") or body.get("data") or body.get("text") or ""
-                raw_bytes = str(raw_text).encode("utf-8", errors="ignore")
-            else:
-                raw_bytes = str(body).encode("utf-8", errors="ignore")
-        else:
-            raw_bytes = await request.body()
-
-        if len(raw_bytes.strip()) < 10:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Raw email payload must be at least 10 characters.",
-            )
-
-        parsed = parse_eml_bytes(raw_bytes)
-        case_data = await execute_forensic_pipeline(parsed, dlp_masking=True)
-        saved = save_case(case_data)
-        return CaseResponseDTO.model_validate(saved)
 
     # Global Exception Handlers
     @app.exception_handler(StarletteHTTPException)
@@ -219,7 +150,7 @@ def create_app() -> FastAPI:
                 "geoip_asn_available": settings.GEOLITE2_ASN_PATH.exists(),
                 "tor_cache_available": settings.TOR_EXIT_NODES_PATH.exists(),
                 "groq_configured": bool(settings.GROQ_API_KEY),
-                "groq_model": settings.GROQ_MODEL,
+                "ollama_url": settings.OLLAMA_URL,
             },
         }
 

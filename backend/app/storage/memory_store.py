@@ -54,6 +54,13 @@ class MemoryCaseStore:
         with self._lock:
             return [dict(c) for c in self._cases]
 
+    def purge(self) -> int:
+        """Purge all stored cases in memory (ephemeral zero-trace wipe). Returns count of purged cases."""
+        with self._lock:
+            purged_count = len(self._cases)
+            self._cases.clear()
+            return purged_count
+
     def clear(self) -> None:
         """Clear all stored cases in memory (useful for test isolation)."""
         with self._lock:
@@ -81,6 +88,10 @@ def get_case(case_id: str) -> Optional[Dict[str, Any]]:
 
 def list_recent_cases() -> List[Dict[str, Any]]:
     return case_store.list_recent_cases()
+
+
+def purge_cases() -> int:
+    return case_store.purge()
 
 
 def clear_store() -> None:
