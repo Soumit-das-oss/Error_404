@@ -55,7 +55,11 @@ export default function App() {
       } else {
         // Mobile upload: RFC 5322 raw email text with optional attachments
         formData.append('raw_email', payload.data);
-        if (payload.attachment) {
+        if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+          payload.attachments.forEach((att) => {
+            formData.append('attachments', att);
+          });
+        } else if (payload.attachment) {
           formData.append('attachments', payload.attachment);
         }
       }
@@ -157,6 +161,10 @@ export default function App() {
                   <Dashboard
                     onSelectCase={handleSelectCase}
                     onNewScan={handleNewScan}
+                    onWipeComplete={() => {
+                      setScanData(null);
+                      setActiveTab('desktop');
+                    }}
                   />
                 )}
 

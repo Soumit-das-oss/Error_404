@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { downloadCasePdf } from '../utils/pdfExport';
 
-export default function Dashboard({ onSelectCase, onNewScan }) {
+export default function Dashboard({ onSelectCase, onNewScan, onWipeComplete }) {
   const [cases, setCases] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -57,6 +57,9 @@ export default function Dashboard({ onSelectCase, onNewScan }) {
       setTotal(0);
       setWipeNotice("Volatile RAM purged. Zero evidence remaining.");
       setTimeout(() => setWipeNotice(null), 5000);
+      if (onWipeComplete) {
+        onWipeComplete();
+      }
     } catch (err) {
       console.error('Memory wipe error:', err);
       setError(err.message || 'Failed to purge volatile memory');

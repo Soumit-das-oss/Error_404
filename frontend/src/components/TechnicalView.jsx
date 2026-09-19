@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { 
   AlertTriangle, Shield, KeyRound, Lock, Terminal, Globe, Network, 
-  Code2, ArrowRight, Download, CheckCircle2, XCircle, AlertCircle,
+  Code2, Download, CheckCircle2, XCircle, AlertCircle,
   ArrowLeft, Copy, Check, ShieldCheck, ShieldAlert, Loader2
 } from 'lucide-react';
 import { downloadCasePdf } from '../utils/pdfExport';
+import HopTransitMap from './HopTransitMap';
 
 const RiskGauge = ({ score }) => {
   const radius = 40;
@@ -266,54 +267,19 @@ export default function TechnicalView({ data, onBack }) {
           </p>
         </div>
 
-        {/* Trace Map & Headers */}
-        <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl shadow-xl overflow-hidden hover:border-cyan-500/40 transition-colors duration-300 flex flex-col">
-          
-          <div className="p-4 sm:p-6 border-b border-zinc-800 flex flex-col gap-4 sm:gap-6">
-            <h3 className="text-[11px] sm:text-xs font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
-              <Network className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-zinc-400" /> Routing Hops
-            </h3>
-            
-            {/* Native horizontal scrolling on all devices for Trace Nodes */}
-            <div className="flex flex-row items-center gap-3 sm:gap-4 overflow-x-auto pb-4 snap-x">
-              {data.trace.map((node, idx) => (
-                <div key={idx} className="flex items-center gap-3 sm:gap-4 shrink-0 snap-start">
-                  <div className={`flex flex-col gap-2 p-2.5 sm:p-3 rounded-lg border bg-zinc-950 w-[130px] sm:w-[140px] shrink-0 ${
-                    node.type === 'danger' ? 'border-rose-500/30' :
-                    node.type === 'warn' ? 'border-amber-500/30' :
-                    'border-emerald-500/30'
-                  }`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{node.geo}</span>
-                      <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
-                        node.type === 'danger' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]' :
-                        node.type === 'warn' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)]' :
-                        'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]'
-                      }`} />
-                    </div>
-                    <span className="text-[11px] sm:text-xs font-bold text-zinc-200 truncate">{node.label}</span>
-                    <span className="font-mono text-[9px] sm:text-[10px] text-cyan-400 truncate w-full block">{node.ip}</span>
-                  </div>
-                  
-                  {idx < data.trace.length - 1 && (
-                    <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-zinc-600 shrink-0" />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* Interactive 100% Offline 2D SVG Hop Route Map */}
+        <HopTransitMap hops={data.hops} trace={data.trace} />
 
-          <div className="p-4 sm:p-6 bg-[#090b13] flex flex-col gap-2 sm:gap-3">
-            <h3 className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
-              <Code2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-zinc-400" /> Raw Headers Inspector
-            </h3>
-            <div className="overflow-auto max-h-[120px] sm:max-h-[150px] custom-scrollbar">
-              <pre className="font-mono text-[10px] sm:text-[11px] text-zinc-400 leading-relaxed whitespace-pre-wrap break-all pr-2">
-                {data.headers}
-              </pre>
-            </div>
+        {/* Raw Headers Inspector */}
+        <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl shadow-xl overflow-hidden hover:border-cyan-500/40 transition-colors duration-300 p-4 sm:p-6 bg-[#090b13] flex flex-col gap-2 sm:gap-3">
+          <h3 className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+            <Code2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-zinc-400" /> Raw Headers Inspector
+          </h3>
+          <div className="overflow-auto max-h-[120px] sm:max-h-[150px] custom-scrollbar">
+            <pre className="font-mono text-[10px] sm:text-[11px] text-zinc-400 leading-relaxed whitespace-pre-wrap break-all pr-2">
+              {data.headers}
+            </pre>
           </div>
-
         </div>
 
       </div>

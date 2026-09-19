@@ -4,7 +4,7 @@ SIH Problem Statement: SIH26106
 
 Coordinates DLP sanitization and manages automatic 3-tier failover:
   Tier 1: Cloud LLM (Groq API, 4.0s timeout)
-  Tier 2: Local Offline LLM (Ollama instance, 5.0s timeout)
+  Tier 2: Local Offline LLM (Ollama instance, 15-25s timeout)
   Tier 3: Deterministic Forensic Static Heuristic Briefing (Offline Guarantee)
 """
 
@@ -15,6 +15,7 @@ from app.services.dlp_shield import sanitize_text
 from app.services.ai.groq_provider import generate_groq_briefing
 from app.services.ai.ollama_provider import (
     generate_ollama_briefing,
+    get_last_used_model,
     REFUSAL_TRIGGERS,
     VAJRA_SOC_SYSTEM_PROMPT,
 )
@@ -151,9 +152,10 @@ async def generate_threat_explanation(
             "dlp_security": dlp_security,
         }
     except Exception as groq_err:
-        logger.warning(f"Tier 1 (Groq) unavailable or failed ({groq_err}); failing over to Tier 2 (Ollama).")
+        logger.warning("Tier 1 (Groq Cloud) unavailable or offline. Engaging Tier 2 (Local Air-Gapped Ollama)...")
+        logger.debug(f"Tier 1 (Groq) error detail: {groq_err}")
 
-    # 3. Tier 2: Ollama Local Air-Gapped Provider (15.0s timeout)
+    # 3. Tier 2: Ollama Local Air-Gapped Provider (15-25s timeout)
     try:
         raw_summary = await generate_ollama_briefing(prompt, system_prompt=VAJRA_SOC_SYSTEM_PROMPT)
         if raw_summary:
@@ -167,7 +169,8 @@ async def generate_threat_explanation(
             logger.warning("Tier 2 (Ollama) output invalid or refused; falling back to Tier 3 (Deterministic Template).")
         else:
             logger.info("Successfully generated threat briefing via Tier 2 Ollama local engine.")
-            summary = f"[Engine: Local Air-Gapped Ollama ({settings.OLLAMA_MODEL})] {raw_summary}"
+            used_model = get_last_used_model() or settings.OLLAMA_MODEL
+            summary = f"[Engine: Local Air-Gapped Ollama ({used_model})] {raw_summary}"
             return {
                 "summary": summary,
                 "engine_used": "ollama",
